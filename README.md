@@ -8,9 +8,13 @@ Install globally to make the command available system-wide:
 
 ```bash
 cd uv-deps-switcher
-uv pip install -e .
-# or
-uv pip install .
+uv tool install .
+```
+
+For editable/development installation:
+
+```bash
+uv tool install -e .
 ```
 
 After installation, the `switch-uv-deps` command will be available globally from any directory.
