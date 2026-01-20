@@ -13,6 +13,29 @@ except ImportError:
 from .config import find_config_file, get_group_repos, list_groups, load_config
 
 
+def parse_template_sources(template_content: str) -> dict:
+    """Parse template content and extract the [tool.uv.sources] dictionary."""
+    try:
+        parsed = tomllib.loads(template_content)
+        return parsed.get("tool", {}).get("uv", {}).get("sources", {})
+    except Exception:
+        return {}
+
+
+def extract_source_key(line: str) -> Optional[str]:
+    """Extract the key name from a TOML source line (e.g., 'some-dep = {...}' -> 'some-dep')."""
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#") or stripped.startswith("["):
+        return None
+    if "=" in stripped:
+        key = stripped.split("=", 1)[0].strip()
+        # Handle quoted keys
+        if (key.startswith('"') and key.endswith('"')) or (key.startswith("'") and key.endswith("'")):
+            key = key[1:-1]
+        return key if key else None
+    return None
+
+
 def find_workspace_root(start_path: Path) -> Optional[Path]:
     """Find workspace root by looking for .code-workspace, .vscode, or ACTIVE_DEV."""
     current = start_path.resolve()
@@ -68,7 +91,7 @@ def read_template(project_path: Path, mode: str) -> Optional[str]:
 
 
 def update_pyproject_sources(pyproject_path: Path, template_content: str, dry_run: bool = False) -> bool:
-    """Update [tool.uv.sources] section in pyproject.toml."""
+    """Update [tool.uv.sources] section in pyproject.toml, merging template items with existing entries."""
     if not pyproject_path.exists():
         print(f"Error: {pyproject_path} does not exist", file=sys.stderr)
         return False
@@ -78,6 +101,20 @@ def update_pyproject_sources(pyproject_path: Path, template_content: str, dry_ru
         return True
     
     try:
+        # Parse template to get keys and build a mapping of key -> line content
+        template_sources = parse_template_sources(template_content)
+        template_keys = set(template_sources.keys())
+        
+        # Build template lines mapping (key -> full line text)
+        template_lines_map = {}
+        for tline in template_content.strip().split("\n"):
+            tkey = extract_source_key(tline)
+            if tkey and tkey in template_keys:
+                template_lines_map[tkey] = tline
+        
+        # Track which template keys have been used
+        used_template_keys = set()
+        
         # Read current file
         content = pyproject_path.read_text(encoding="utf-8")
         lines = content.split("\n")
@@ -85,7 +122,7 @@ def update_pyproject_sources(pyproject_path: Path, template_content: str, dry_ru
         in_sources_section = False
         section_found = False
         
-        # Process lines to find and replace [tool.uv.sources] section
+        # Process lines to find and merge [tool.uv.sources] section
         i = 0
         while i < len(lines):
             line = lines[i]
@@ -95,38 +132,51 @@ def update_pyproject_sources(pyproject_path: Path, template_content: str, dry_ru
             if stripped == "[tool.uv.sources]":
                 section_found = True
                 in_sources_section = True
-                # Add the section header
                 new_lines.append("[tool.uv.sources]")
-                # Add template content (skip the header if present)
-                template_lines = template_content.strip().split("\n")
-                for template_line in template_lines:
-                    template_stripped = template_line.strip()
-                    # Skip if it's the section header
-                    if template_stripped == "[tool.uv.sources]":
-                        continue
-                    new_lines.append(template_line)
-                
-                # Skip current line and continue to find end of section
                 i += 1
-                # Skip all lines until we hit the next section or end of file
+                
+                # Process existing section lines and merge with template
                 while i < len(lines):
                     next_line = lines[i]
                     next_stripped = next_line.strip()
+                    
                     # Stop at next section (starts with [)
                     if next_stripped.startswith("[") and not next_stripped.startswith("[tool.uv.sources"):
                         in_sources_section = False
-                        # Add blank line before next section
+                        # Add any unused template keys before leaving section
+                        for tkey in template_keys - used_template_keys:
+                            if tkey in template_lines_map:
+                                new_lines.append(template_lines_map[tkey])
+                        # Add blank line before next section if needed
                         if new_lines and new_lines[-1].strip():
                             new_lines.append("")
                         new_lines.append(next_line)
                         i += 1
                         break
-                    # Stop at end of file
-                    if i == len(lines) - 1:
-                        in_sources_section = False
-                        i += 1
-                        break
+                    
+                    # Check if this line has a key we should replace
+                    line_key = extract_source_key(next_line)
+                    if line_key and line_key in template_keys:
+                        # Replace with template version
+                        if line_key in template_lines_map:
+                            new_lines.append(template_lines_map[line_key])
+                        used_template_keys.add(line_key)
+                    elif next_stripped:
+                        # Keep existing line (not in template, or blank/comment)
+                        new_lines.append(next_line)
+                    else:
+                        # Preserve blank lines
+                        new_lines.append(next_line)
+                    
                     i += 1
+                
+                # Handle case where section goes to end of file
+                if in_sources_section:
+                    in_sources_section = False
+                    # Add any unused template keys
+                    for tkey in template_keys - used_template_keys:
+                        if tkey in template_lines_map:
+                            new_lines.append(template_lines_map[tkey])
                 continue
             
             # Regular line - add it if we're not in sources section
@@ -137,21 +187,15 @@ def update_pyproject_sources(pyproject_path: Path, template_content: str, dry_ru
         
         # If section wasn't found, append it at the end
         if not section_found:
-            # Ensure we end with a newline
             if new_lines and new_lines[-1].strip():
                 new_lines.append("")
             new_lines.append("[tool.uv.sources]")
-            template_lines = template_content.strip().split("\n")
-            for template_line in template_lines:
-                template_stripped = template_line.strip()
-                # Skip if it's the section header
-                if template_stripped == "[tool.uv.sources]":
-                    continue
-                new_lines.append(template_line)
+            for tkey in template_keys:
+                if tkey in template_lines_map:
+                    new_lines.append(template_lines_map[tkey])
         
         # Write updated content
         updated_content = "\n".join(new_lines)
-        # Ensure file ends with newline
         if not updated_content.endswith("\n"):
             updated_content += "\n"
         pyproject_path.write_text(updated_content, encoding="utf-8")
