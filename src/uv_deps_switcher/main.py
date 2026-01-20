@@ -53,6 +53,14 @@ def find_workspace_root(start_path: Path) -> Optional[Path]:
     return None
 
 
+def is_valid_project(project_path: Path) -> bool:
+    """Check if a directory is a valid project with templating."""
+    templating_dir = project_path / "templating"
+    dev_template = templating_dir / "pyproject_template_dev.toml_fragment"
+    release_template = templating_dir / "pyproject_template_release.toml_fragment"
+    return dev_template.exists() and release_template.exists()
+
+
 def find_projects_with_templating(workspace_root: Path) -> List[Path]:
     """Find all projects that have templating folders with both dev and release templates."""
     projects = []
@@ -259,9 +267,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  switch-uv-deps dev --group main
+  switch-uv-deps dev                              # Switch current project (if valid)
+  switch-uv-deps release                          # Switch current project to release mode
+  switch-uv-deps dev --group main                 # Switch all repos in a group
   switch-uv-deps release --group main
-  switch-uv-deps dev --all
+  switch-uv-deps dev --all                        # Switch all detected repos
   switch-uv-deps dev --repo PhoLogToLabStreamingLayer
   switch-uv-deps list-groups
         """
@@ -303,57 +313,63 @@ Examples:
     
     args = parser.parse_args()
     
-    # Determine workspace root
-    if args.workspace_root:
-        workspace_root = Path(args.workspace_root).resolve()
-    else:
-        workspace_root = find_workspace_root(Path.cwd())
-        if workspace_root is None:
-            print("Error: Could not detect workspace root. Use --workspace-root to specify it.", file=sys.stderr)
-            return 1
-    
-    # Find all projects with templating
-    all_projects = find_projects_with_templating(workspace_root)
-    
-    if not all_projects:
-        print(f"No projects with templating folders found in {workspace_root}", file=sys.stderr)
-        return 1
-    
     # Determine which repos to switch
     repos_to_switch = []
     
-    if args.all:
-        repos_to_switch = all_projects
-    elif args.group:
-        groups = load_config()
-        group_repos = get_group_repos(groups, args.group)
-        if group_repos is None:
-            print(f"Error: Group '{args.group}' not found in configuration", file=sys.stderr)
-            print("Available groups:", file=sys.stderr)
-            list_groups(groups)
-            return 1
-        
-        # Match group repo names to project paths
-        for project_path in all_projects:
-            if project_path.name in group_repos:
-                repos_to_switch.append(project_path)
-        
-        # Check for missing repos
-        found_repos = {p.name for p in repos_to_switch}
-        missing_repos = set(group_repos) - found_repos
-        if missing_repos:
-            print(f"Warning: Some repos in group '{args.group}' were not found: {', '.join(missing_repos)}", file=sys.stderr)
-    elif args.repo:
-        for project_path in all_projects:
-            if project_path.name == args.repo:
-                repos_to_switch.append(project_path)
-                break
-        if not repos_to_switch:
-            print(f"Error: Repo '{args.repo}' not found", file=sys.stderr)
+    # Check if running in local project mode (no flags, current dir is valid project)
+    if not args.all and not args.group and not args.repo:
+        cwd = Path.cwd()
+        if is_valid_project(cwd):
+            repos_to_switch = [cwd]
+        else:
+            print("Error: Must specify --group, --all, or --repo, or run from within a valid project folder", file=sys.stderr)
             return 1
     else:
-        print("Error: Must specify --group, --all, or --repo", file=sys.stderr)
-        return 1
+        # Need workspace root for --all, --group, or --repo modes
+        if args.workspace_root:
+            workspace_root = Path(args.workspace_root).resolve()
+        else:
+            workspace_root = find_workspace_root(Path.cwd())
+            if workspace_root is None:
+                print("Error: Could not detect workspace root. Use --workspace-root to specify it.", file=sys.stderr)
+                return 1
+        
+        # Find all projects with templating
+        all_projects = find_projects_with_templating(workspace_root)
+        
+        if not all_projects:
+            print(f"No projects with templating folders found in {workspace_root}", file=sys.stderr)
+            return 1
+        
+        if args.all:
+            repos_to_switch = all_projects
+        elif args.group:
+            groups = load_config()
+            group_repos = get_group_repos(groups, args.group)
+            if group_repos is None:
+                print(f"Error: Group '{args.group}' not found in configuration", file=sys.stderr)
+                print("Available groups:", file=sys.stderr)
+                list_groups(groups)
+                return 1
+            
+            # Match group repo names to project paths
+            for project_path in all_projects:
+                if project_path.name in group_repos:
+                    repos_to_switch.append(project_path)
+            
+            # Check for missing repos
+            found_repos = {p.name for p in repos_to_switch}
+            missing_repos = set(group_repos) - found_repos
+            if missing_repos:
+                print(f"Warning: Some repos in group '{args.group}' were not found: {', '.join(missing_repos)}", file=sys.stderr)
+        elif args.repo:
+            for project_path in all_projects:
+                if project_path.name == args.repo:
+                    repos_to_switch.append(project_path)
+                    break
+            if not repos_to_switch:
+                print(f"Error: Repo '{args.repo}' not found", file=sys.stderr)
+                return 1
     
     if not repos_to_switch:
         print("No repos to switch", file=sys.stderr)

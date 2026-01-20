@@ -80,6 +80,18 @@ Switch a single repo by name:
 switch-uv-deps dev --repo PhoLogToLabStreamingLayer
 ```
 
+### Switch Current Project (Local Mode)
+
+When inside a valid project folder (containing the templating files), you can switch just that project without any flags:
+
+```bash
+cd /path/to/my-project
+switch-uv-deps dev      # Switch current project to dev mode
+switch-uv-deps release  # Switch current project to release mode
+```
+
+This is useful for quickly switching a single project without needing to specify groups or repo names.
+
 ### Additional Options
 
 ```bash
