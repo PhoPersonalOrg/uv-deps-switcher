@@ -1,6 +1,7 @@
 """Main CLI entry point for UV dependency switcher."""
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -193,6 +194,11 @@ def update_pyproject_sources(pyproject_path: Path, template_content: str, dry_ru
             for tkey in template_keys:
                 if tkey in template_lines_map:
                     new_lines.append(template_lines_map[tkey])
+        
+        # Save backup before writing changes
+        backup_dir = pyproject_path.parent / "templating" / "uv_deps_switcher" / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(pyproject_path, backup_dir / "pyproject.toml.bak")
         
         # Write updated content
         updated_content = "\n".join(new_lines)
