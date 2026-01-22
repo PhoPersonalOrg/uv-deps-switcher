@@ -1,0 +1,25 @@
+[tool.uv.sources]
+{%- if 'lab-recorder-python' in include_deps %}
+lab-recorder-python = { git = "https://github.com/CommanderPho/lab-recorder-python.git" }
+{%- endif %}
+{%- if 'whisper-timestamped' in include_deps %}
+whisper-timestamped = { git = "https://github.com/CommanderPho/whisper-timestamped.git" }
+{%- endif %}
+{%- if 'phopylslhelper' in include_deps %}
+phopylslhelper = { git = "https://github.com/CommanderPho/phopylslhelper.git" }
+{%- endif %}
+{%- if 'phopymnehelper' in include_deps %}
+phopymnehelper = { git = "https://github.com/CommanderPho/PhoPyMNEHelper.git" }
+{%- endif %}
+{%- if 'phopyqthelper' in include_deps %}
+phopyqthelper = { git = "https://github.com/CommanderPho/phopyqthelper.git" }
+{%- endif %}
+{%- if 'pyphoplacecellanalysis' in include_deps %}
+pyphoplacecellanalysis = { git = "https://github.com/CommanderPho/pyPhoPlaceCellAnalysis.git" }
+{%- endif %}
+{%- if 'neuropy' in include_deps %}
+neuropy = { git = "https://github.com/CommanderPho/NeuroPy.git" }
+{%- endif %}
+{%- if 'pyphocorehelpers' in include_deps %}
+pyphocorehelpers = { git = "https://github.com/CommanderPho/pyPhoCoreHelpers.git" }
+{%- endif %}

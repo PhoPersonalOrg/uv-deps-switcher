@@ -1,10 +1,15 @@
 """Main CLI entry point for UV dependency switcher."""
 
 import argparse
+import re
 import shutil
+import subprocess
 import sys
+from importlib import resources
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Set, Tuple
+
+from jinja2 import Environment, BaseLoader, TemplateNotFound
 
 try:
     import tomllib
@@ -14,6 +19,28 @@ except ImportError:
 from .config import find_config_file, get_group_repos, list_groups, load_config
 
 
+class PackageTemplateLoader(BaseLoader):
+    """Jinja2 template loader that loads from package resources."""
+    
+    def __init__(self, package: str):
+        self.package = package
+    
+    def get_source(self, environment, template):
+        try:
+            # Python 3.9+ way to read package resources
+            template_path = resources.files(self.package).joinpath(template)
+            source = template_path.read_text(encoding="utf-8")
+            return source, str(template_path), lambda: True
+        except (FileNotFoundError, TypeError):
+            raise TemplateNotFound(template)
+
+
+def get_jinja_env() -> Environment:
+    """Get Jinja2 environment configured to load templates from package."""
+    loader = PackageTemplateLoader("uv_deps_switcher.templates")
+    return Environment(loader=loader, keep_trailing_newline=True)
+
+
 def parse_template_sources(template_content: str) -> dict:
     """Parse template content and extract the [tool.uv.sources] dictionary."""
     try:
@@ -21,6 +48,111 @@ def parse_template_sources(template_content: str) -> dict:
         return parsed.get("tool", {}).get("uv", {}).get("sources", {})
     except Exception:
         return {}
+
+
+def extract_dev_paths(template_content: str) -> Dict[str, str]:
+    """Extract local paths from dev template. Returns {dep_name: local_path}."""
+    sources = parse_template_sources(template_content)
+    paths = {}
+    for dep_name, config in sources.items():
+        if isinstance(config, dict) and "path" in config:
+            paths[dep_name] = config["path"]
+    return paths
+
+
+def extract_git_urls(template_content: str) -> Dict[str, str]:
+    """Extract git URLs from release template. Returns {dep_name: git_url}."""
+    sources = parse_template_sources(template_content)
+    urls = {}
+    for dep_name, config in sources.items():
+        if isinstance(config, dict) and "git" in config:
+            urls[dep_name] = config["git"]
+    return urls
+
+
+def find_missing_dependencies(project_path: Path, dev_paths: Dict[str, str]) -> List[Tuple[str, str]]:
+    """Check which local dependency paths don't exist. Returns list of (dep_name, missing_path)."""
+    missing = []
+    for dep_name, rel_path in dev_paths.items():
+        # Resolve the path relative to the project
+        abs_path = (project_path / rel_path).resolve()
+        if not abs_path.exists():
+            missing.append((dep_name, rel_path))
+    return missing
+
+
+def clone_dependency(git_url: str, target_path: Path, dry_run: bool = False) -> bool:
+    """Clone a git repository to the specified path."""
+    if dry_run:
+        print(f"    [DRY RUN] Would clone {git_url} to {target_path}")
+        return True
+    
+    if target_path.exists():
+        print(f"    Warning: {target_path} already exists, skipping clone", file=sys.stderr)
+        return True
+    
+    try:
+        print(f"    Cloning {git_url}...")
+        result = subprocess.run(["git", "clone", git_url, str(target_path)], capture_output=True, text=True, timeout=300)
+        if result.returncode == 0:
+            print(f"    Cloned to {target_path}")
+            return True
+        else:
+            print(f"    Error cloning: {result.stderr}", file=sys.stderr)
+            return False
+    except subprocess.TimeoutExpired:
+        print(f"    Error: Clone timed out after 5 minutes", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"    Error cloning: {e}", file=sys.stderr)
+        return False
+
+
+def check_and_clone_missing_deps(project_path: Path, dev_template: str, release_template: str, dry_run: bool = False, auto_yes: bool = False, no_clone: bool = False) -> bool:
+    """Check for missing dependencies and offer to clone them. Returns True if ready to proceed."""
+    if no_clone:
+        return True
+    
+    # Extract paths and URLs from templates
+    dev_paths = extract_dev_paths(dev_template)
+    git_urls = extract_git_urls(release_template)
+    
+    # Find missing paths
+    missing = find_missing_dependencies(project_path, dev_paths)
+    
+    if not missing:
+        return True
+    
+    # Show missing dependencies
+    print(f"  Missing local dependencies:")
+    cloneable = []
+    for dep_name, rel_path in missing:
+        abs_path = (project_path / rel_path).resolve()
+        if dep_name in git_urls:
+            print(f"    - {dep_name} -> {rel_path} (not found)")
+            cloneable.append((dep_name, rel_path, git_urls[dep_name]))
+        else:
+            print(f"    - {dep_name} -> {rel_path} (not found, no git URL available)")
+    
+    if not cloneable:
+        print(f"  Warning: No git URLs available for missing dependencies", file=sys.stderr)
+        return True  # Continue anyway, uv will fail later if deps are missing
+    
+    # Ask user if they want to clone
+    if not dry_run and not auto_yes:
+        response = input(f"\n  Clone {len(cloneable)} missing repo(s) from GitHub? [y/N]: ")
+        if response.lower() not in ["y", "yes"]:
+            print("  Skipping clone, continuing with switch...")
+            return True
+    
+    # Clone each missing dependency
+    all_success = True
+    for dep_name, rel_path, git_url in cloneable:
+        target_path = (project_path / rel_path).resolve()
+        if not clone_dependency(git_url, target_path, dry_run=dry_run):
+            all_success = False
+    
+    return all_success
 
 
 def extract_source_key(line: str) -> Optional[str]:
@@ -222,7 +354,176 @@ def update_pyproject_sources(pyproject_path: Path, template_content: str, dry_ru
         return False
 
 
-def switch_repos(repos: List[Path], mode: str, dry_run: bool = False) -> int:
+def extract_package_name(dep_string: str) -> str:
+    """Extract package name from a dependency string (e.g., 'package>=1.0' -> 'package')."""
+    # Remove extras like [extra1,extra2]
+    dep_string = re.split(r'\[', dep_string)[0]
+    # Remove version specifiers
+    dep_string = re.split(r'[<>=!~;]', dep_string)[0]
+    return dep_string.strip()
+
+
+def read_project_dependencies(pyproject_path: Path) -> Set[str]:
+    """Read all dependency names from [project.dependencies] in a pyproject.toml file."""
+    if not pyproject_path.exists():
+        return set()
+    
+    try:
+        with open(pyproject_path, "rb") as f:
+            data = tomllib.load(f)
+        
+        deps = set()
+        # Read from [project.dependencies]
+        project_deps = data.get("project", {}).get("dependencies", [])
+        for dep in project_deps:
+            pkg_name = extract_package_name(dep)
+            if pkg_name:
+                deps.add(pkg_name)
+        
+        # Also read from [project.optional-dependencies] if present
+        optional_deps = data.get("project", {}).get("optional-dependencies", {})
+        for group_deps in optional_deps.values():
+            for dep in group_deps:
+                pkg_name = extract_package_name(dep)
+                if pkg_name:
+                    deps.add(pkg_name)
+        
+        return deps
+    except Exception as e:
+        print(f"Error reading dependencies from {pyproject_path}: {e}", file=sys.stderr)
+        return set()
+
+
+def read_current_sources(pyproject_path: Path) -> Dict[str, dict]:
+    """Read the current [tool.uv.sources] section from a pyproject.toml file."""
+    if not pyproject_path.exists():
+        return {}
+    
+    try:
+        with open(pyproject_path, "rb") as f:
+            data = tomllib.load(f)
+        return data.get("tool", {}).get("uv", {}).get("sources", {})
+    except Exception as e:
+        print(f"Error reading sources from {pyproject_path}: {e}", file=sys.stderr)
+        return {}
+
+
+def get_git_remote_url(repo_path: Path) -> Optional[str]:
+    """Get the git remote URL (origin) from a local repository path."""
+    if not repo_path.exists() or not repo_path.is_dir():
+        return None
+    
+    git_dir = repo_path / ".git"
+    if not git_dir.exists():
+        return None
+    
+    try:
+        result = subprocess.run(["git", "remote", "get-url", "origin"], cwd=repo_path, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            url = result.stdout.strip()
+            # Convert SSH URLs to HTTPS if needed
+            if url.startswith("git@"):
+                # git@github.com:user/repo.git -> https://github.com/user/repo.git
+                url = re.sub(r'^git@([^:]+):', r'https://\1/', url)
+            return url
+        return None
+    except Exception:
+        return None
+
+
+def filter_sources_by_dependencies(sources: Dict[str, dict], dependencies: Set[str]) -> Dict[str, dict]:
+    """Filter sources dict to only include entries that match project dependencies."""
+    filtered = {}
+    for key, value in sources.items():
+        if key in dependencies:
+            filtered[key] = value
+    return filtered
+
+
+def render_template(template_name: str, include_deps: Set[str]) -> str:
+    """Render a Jinja2 template with the given dependencies to include."""
+    env = get_jinja_env()
+    template = env.get_template(template_name)
+    return template.render(include_deps=include_deps)
+
+
+def generate_dev_template(include_deps: Set[str]) -> str:
+    """Generate dev template fragment using Jinja2 template."""
+    return render_template("pyproject_template_dev.toml_fragment.j2", include_deps)
+
+
+def generate_release_template(include_deps: Set[str]) -> str:
+    """Generate release template fragment using Jinja2 template."""
+    return render_template("pyproject_template_release.toml_fragment.j2", include_deps)
+
+
+def deploy_templates(project_path: Path, dry_run: bool = False) -> bool:
+    """Deploy template fragments to a project based on its current dependencies and sources."""
+    pyproject_path = project_path / "pyproject.toml"
+    
+    if not pyproject_path.exists():
+        print(f"Error: {pyproject_path} does not exist", file=sys.stderr)
+        return False
+    
+    # Read current sources and dependencies
+    sources = read_current_sources(pyproject_path)
+    dependencies = read_project_dependencies(pyproject_path)
+    
+    # Determine which dependencies to include in templates
+    # Use sources keys if available, otherwise use project dependencies
+    if sources:
+        # Filter to only include source keys that are also in dependencies
+        include_deps = set(sources.keys())
+        if dependencies:
+            include_deps = include_deps & dependencies
+    elif dependencies:
+        include_deps = dependencies
+    else:
+        print("Error: No [tool.uv.sources] or [project.dependencies] found in pyproject.toml", file=sys.stderr)
+        return False
+    
+    if not include_deps:
+        print("Warning: No matching dependencies found. Using all sources.", file=sys.stderr)
+        include_deps = set(sources.keys()) if sources else dependencies
+    
+    # Generate templates using Jinja2
+    dev_template = generate_dev_template(include_deps)
+    release_template = generate_release_template(include_deps)
+    
+    # Show what will be created
+    print(f"Deploying templates to {project_path.name}...")
+    print(f"  Dependencies to include: {', '.join(sorted(include_deps))}")
+    
+    if dry_run:
+        print("\n[DRY RUN] Would create:")
+        print(f"  templating/pyproject_template_dev.toml_fragment")
+        print(f"  templating/pyproject_template_release.toml_fragment")
+        print("\nDev template content:")
+        print(dev_template)
+        print("Release template content:")
+        print(release_template)
+        return True
+    
+    # Create templating directory if it doesn't exist
+    templating_dir = project_path / "templating"
+    templating_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Write templates
+    dev_path = templating_dir / "pyproject_template_dev.toml_fragment"
+    release_path = templating_dir / "pyproject_template_release.toml_fragment"
+    
+    try:
+        dev_path.write_text(dev_template, encoding="utf-8")
+        release_path.write_text(release_template, encoding="utf-8")
+        print(f"  Created {dev_path}")
+        print(f"  Created {release_path}")
+        return True
+    except Exception as e:
+        print(f"Error writing templates: {e}", file=sys.stderr)
+        return False
+
+
+def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: bool = False, no_clone: bool = False) -> int:
     """Switch dependencies for a list of repos."""
     success_count = 0
     fail_count = 0
@@ -243,6 +544,12 @@ def switch_repos(repos: List[Path], mode: str, dry_run: bool = False) -> int:
             fail_count += 1
             continue
         
+        # For dev mode, check for missing dependencies and offer to clone
+        if mode == "dev":
+            release_template = read_template(repo_path, "release")
+            if release_template:
+                check_and_clone_missing_deps(repo_path, template_content, release_template, dry_run=dry_run, auto_yes=auto_yes, no_clone=no_clone)
+        
         if update_pyproject_sources(pyproject_path, template_content, dry_run=dry_run):
             if not dry_run:
                 print(f"  Updated {repo_name} to {mode} mode")
@@ -262,6 +569,32 @@ def main():
         list_groups(groups)
         return 0
     
+    # Handle deploy-templates command separately
+    if len(sys.argv) > 1 and sys.argv[1] == "deploy-templates":
+        deploy_parser = argparse.ArgumentParser(prog="uv-deps-switcher deploy-templates", description="Deploy template fragments to current project based on its dependencies")
+        deploy_parser.add_argument("--dry-run", action="store_true", help="Show what would be created without making changes")
+        deploy_parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
+        deploy_args = deploy_parser.parse_args(sys.argv[2:])
+        
+        cwd = Path.cwd()
+        pyproject_path = cwd / "pyproject.toml"
+        
+        if not pyproject_path.exists():
+            print("Error: No pyproject.toml found in current directory", file=sys.stderr)
+            return 1
+        
+        if not deploy_args.dry_run and not deploy_args.yes:
+            response = input(f"Deploy templates to {cwd.name}? [y/N]: ")
+            if response.lower() not in ["y", "yes"]:
+                print("Cancelled")
+                return 0
+        
+        if deploy_templates(cwd, dry_run=deploy_args.dry_run):
+            if not deploy_args.dry_run:
+                print("\nSuccessfully deployed templates!")
+            return 0
+        return 1
+    
     parser = argparse.ArgumentParser(
         description="Switch UV dependency sources between dev and release configurations",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -274,6 +607,7 @@ Examples:
   uv-deps-switcher dev --all                        # Switch all detected repos
   uv-deps-switcher dev --repo PhoLogToLabStreamingLayer
   uv-deps-switcher list-groups
+  uv-deps-switcher deploy-templates                 # Deploy templates to current project
         """
     )
     
@@ -309,6 +643,11 @@ Examples:
         "--dry-run",
         action="store_true",
         help="Show what would be changed without making changes"
+    )
+    parser.add_argument(
+        "--no-clone",
+        action="store_true",
+        help="Skip prompts to clone missing dependencies (dev mode only)"
     )
     
     args = parser.parse_args()
@@ -390,7 +729,7 @@ Examples:
     
     # Perform the switch
     print()
-    fail_count = switch_repos(repos_to_switch, args.mode, dry_run=args.dry_run)
+    fail_count = switch_repos(repos_to_switch, args.mode, dry_run=args.dry_run, auto_yes=args.yes, no_clone=args.no_clone)
     
     if fail_count > 0:
         return 1

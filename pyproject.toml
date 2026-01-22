@@ -1,11 +1,12 @@
 [project]
 name = "uv-deps-switcher"
-version = "0.2.0"
+version = "0.3.0"
 description = "Switch UV dependency sources between dev (local editable) and release (git) configurations across multiple projects"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "tomli>=2.0.1; python_version < '3.11'",
+    "jinja2>=3.0",
 ]
 
 [project.scripts]

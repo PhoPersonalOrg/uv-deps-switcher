@@ -92,6 +92,46 @@ uv-deps-switcher release  # Switch current project to release mode
 
 This is useful for quickly switching a single project without needing to specify groups or repo names.
 
+### Deploy Templates to Current Project
+
+Generate template fragments for the current project based on its existing `[tool.uv.sources]` and `[project.dependencies]`:
+
+```bash
+cd /path/to/my-project
+uv-deps-switcher deploy-templates
+
+# Dry run to preview what would be created
+uv-deps-switcher deploy-templates --dry-run
+```
+
+This command:
+1. Reads the current `[tool.uv.sources]` section from `pyproject.toml`
+2. Filters sources to only include dependencies listed in `[project.dependencies]`
+3. Generates dev templates (with local editable paths)
+4. Generates release templates (with git URLs inferred from local repos)
+5. Writes both templates to the `templating/` directory
+
+### Auto-Clone Missing Dependencies
+
+When switching to dev mode, if any local dependency paths don't exist, the tool will offer to clone them from GitHub:
+
+```
+$ uv-deps-switcher dev
+Processing my-project...
+  Missing local dependencies:
+    - phopylslhelper -> ../PhoPyLSLhelper (not found)
+    - neuropy -> ../NeuroPy (not found)
+  
+  Clone 2 missing repo(s) from GitHub? [y/N]: y
+    Cloning https://github.com/CommanderPho/phopylslhelper.git...
+    Cloned to ../PhoPyLSLhelper
+    Cloning https://github.com/CommanderPho/NeuroPy.git...
+    Cloned to ../NeuroPy
+  Updated my-project to dev mode
+```
+
+Use `--no-clone` to skip this prompt and handle missing dependencies manually.
+
 ### Additional Options
 
 ```bash
@@ -103,6 +143,9 @@ uv-deps-switcher dev --group main --workspace-root /path/to/workspace
 
 # Dry run (show what would be changed without making changes)
 uv-deps-switcher dev --group main --dry-run
+
+# Skip auto-clone prompts for missing dependencies
+uv-deps-switcher dev --no-clone
 
 # List available groups
 uv-deps-switcher list-groups
@@ -144,6 +187,7 @@ phopylslhelper = { git = "https://github.com/CommanderPho/phopylslhelper.git" }
 
 - Python 3.10+
 - `tomli` (for Python < 3.11) or `tomllib` (built-in for Python 3.11+)
+- `jinja2` (for template rendering)
 
 ## License
 

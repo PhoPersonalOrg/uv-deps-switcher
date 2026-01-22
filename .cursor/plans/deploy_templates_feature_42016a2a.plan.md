@@ -4,31 +4,31 @@ overview: Add a `deploy-templates` command that generates template fragments fro
 todos:
   - id: move_templates
     content: Move templated_project_root_template to templates/ folder at project root
-    status: in_progress
+    status: completed
   - id: read_dependencies
     content: Add function to read project dependencies from pyproject.toml
-    status: pending
+    status: completed
   - id: read_sources
     content: Add function to read current [tool.uv.sources] from pyproject.toml
-    status: pending
+    status: completed
   - id: generate_dev_template
     content: Add function to generate dev template from sources dict
-    status: pending
+    status: completed
   - id: generate_release_template
     content: Add function to generate release template by converting paths to git URLs
-    status: pending
+    status: completed
   - id: filter_template
     content: Add function to filter template content by target dependencies
-    status: pending
+    status: completed
   - id: git_url_inference
     content: Implement logic to infer git URLs from local repository paths
-    status: pending
+    status: completed
   - id: deploy_command
     content: Add deploy-templates CLI command and main deployment function
-    status: pending
+    status: completed
   - id: path_calculation
     content: Implement relative path calculation for dev templates
-    status: pending
+    status: completed
 isProject: false
 ---
 
