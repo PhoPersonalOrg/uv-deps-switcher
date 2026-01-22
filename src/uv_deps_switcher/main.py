@@ -267,13 +267,13 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  switch-uv-deps dev                              # Switch current project (if valid)
-  switch-uv-deps release                          # Switch current project to release mode
-  switch-uv-deps dev --group main                 # Switch all repos in a group
-  switch-uv-deps release --group main
-  switch-uv-deps dev --all                        # Switch all detected repos
-  switch-uv-deps dev --repo PhoLogToLabStreamingLayer
-  switch-uv-deps list-groups
+  uv-deps-switcher dev                              # Switch current project (if valid)
+  uv-deps-switcher release                          # Switch current project to release mode
+  uv-deps-switcher dev --group main                 # Switch all repos in a group
+  uv-deps-switcher release --group main
+  uv-deps-switcher dev --all                        # Switch all detected repos
+  uv-deps-switcher dev --repo PhoLogToLabStreamingLayer
+  uv-deps-switcher list-groups
         """
     )
     

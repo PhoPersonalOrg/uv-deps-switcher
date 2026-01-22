@@ -17,7 +17,7 @@ For editable/development installation:
 uv tool install -e .
 ```
 
-After installation, the `switch-uv-deps` command will be available globally from any directory.
+After installation, the `uv-deps-switcher` command will be available globally from any directory.
 
 ## Configuration
 
@@ -58,10 +58,10 @@ Switch all repos in a defined group:
 
 ```bash
 # Switch to dev mode (local editable paths)
-switch-uv-deps dev --group main
+uv-deps-switcher dev --group main
 
 # Switch to release mode (git URLs)
-switch-uv-deps release --group main
+uv-deps-switcher release --group main
 ```
 
 ### Switch All Repos
@@ -69,7 +69,7 @@ switch-uv-deps release --group main
 Switch all detected repos (ignores groups):
 
 ```bash
-switch-uv-deps dev --all
+uv-deps-switcher dev --all
 ```
 
 ### Switch a Single Repo
@@ -77,7 +77,7 @@ switch-uv-deps dev --all
 Switch a single repo by name:
 
 ```bash
-switch-uv-deps dev --repo PhoLogToLabStreamingLayer
+uv-deps-switcher dev --repo PhoLogToLabStreamingLayer
 ```
 
 ### Switch Current Project (Local Mode)
@@ -86,8 +86,8 @@ When inside a valid project folder (containing the templating files), you can sw
 
 ```bash
 cd /path/to/my-project
-switch-uv-deps dev      # Switch current project to dev mode
-switch-uv-deps release  # Switch current project to release mode
+uv-deps-switcher dev      # Switch current project to dev mode
+uv-deps-switcher release  # Switch current project to release mode
 ```
 
 This is useful for quickly switching a single project without needing to specify groups or repo names.
@@ -96,16 +96,16 @@ This is useful for quickly switching a single project without needing to specify
 
 ```bash
 # Skip confirmation prompt
-switch-uv-deps dev --group main --yes
+uv-deps-switcher dev --group main --yes
 
 # Specify workspace root explicitly
-switch-uv-deps dev --group main --workspace-root /path/to/workspace
+uv-deps-switcher dev --group main --workspace-root /path/to/workspace
 
 # Dry run (show what would be changed without making changes)
-switch-uv-deps dev --group main --dry-run
+uv-deps-switcher dev --group main --dry-run
 
 # List available groups
-switch-uv-deps list-groups
+uv-deps-switcher list-groups
 ```
 
 ## How It Works
