@@ -1,25 +1,25 @@
 [tool.uv.sources]
 {%- if 'lab-recorder-python' in include_deps %}
-lab-recorder-python = { path = "../lab-recorder-python", editable = true }
+lab-recorder-python = { path = "../{{ ACTIVE_DEV_PATH_PREFIX }}lab-recorder-python", editable = true }
 {%- endif %}
 {%- if 'whisper-timestamped' in include_deps %}
-whisper-timestamped = { path = "../whisper-timestamped", editable = true }
+whisper-timestamped = { path = "../{{ ACTIVE_DEV_PATH_PREFIX }}whisper-timestamped", editable = true }
 {%- endif %}
 {%- if 'phopylslhelper' in include_deps %}
-phopylslhelper = { path = "../PhoPyLSLhelper", editable = true }
+phopylslhelper = { path = "../{{ ACTIVE_DEV_PATH_PREFIX }}PhoPyLSLhelper", editable = true }
 {%- endif %}
 {%- if 'phopymnehelper' in include_deps %}
-phopymnehelper = { path = "../PhoPyMNEHelper", editable = true }
+phopymnehelper = { path = "../{{ ACTIVE_DEV_PATH_PREFIX }}PhoPyMNEHelper", editable = true }
 {%- endif %}
 {%- if 'phopyqthelper' in include_deps %}
-phopyqthelper = { path = "../phopyqthelper", editable = true }
+phopyqthelper = { path = "../{{ ACTIVE_DEV_PATH_PREFIX }}phopyqthelper", editable = true }
 {%- endif %}
 {%- if 'pyphoplacecellanalysis' in include_deps %}
-pyphoplacecellanalysis = { path = "../pyPhoPlaceCellAnalysis", editable = true }
+pyphoplacecellanalysis = { path = "../{{ ACTIVE_DEV_PATH_PREFIX }}pyPhoPlaceCellAnalysis", editable = true }
 {%- endif %}
 {%- if 'neuropy' in include_deps %}
-neuropy = { path = "../NeuroPy", editable = true }
+neuropy = { path = "../{{ ACTIVE_DEV_PATH_PREFIX }}NeuroPy", editable = true }
 {%- endif %}
 {%- if 'pyphocorehelpers' in include_deps %}
-pyphocorehelpers = { path = "../pyPhoCoreHelpers", editable = true }
+pyphocorehelpers = { path = "../{{ ACTIVE_DEV_PATH_PREFIX }}pyPhoCoreHelpers", editable = true }
 {%- endif %}

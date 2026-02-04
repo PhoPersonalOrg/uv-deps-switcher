@@ -1,6 +1,7 @@
 """Main CLI entry point for UV dependency switcher."""
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -218,14 +219,20 @@ def find_projects_with_templating(workspace_root: Path) -> List[Path]:
 
 
 def read_template(project_path: Path, mode: str) -> Optional[str]:
-    """Read template file for a project."""
+    """Read template file for a project and process environment variable placeholders."""
     template_file = project_path / "templating" / f"pyproject_template_{mode}.toml_fragment"
     
     if not template_file.exists():
         return None
     
     try:
-        return template_file.read_text(encoding="utf-8")
+        template_content = template_file.read_text(encoding="utf-8")
+        # Process environment variable placeholders
+        # Get ACTIVE_DEV_PATH_PREFIX from environment, default to empty string
+        path_prefix = os.getenv("ACTIVE_DEV_PATH_PREFIX", "")
+        # Substitute placeholder in template content
+        processed_content = template_content.replace("{ACTIVE_DEV_PATH_PREFIX}", path_prefix)
+        return processed_content
     except Exception as e:
         print(f"Error reading template {template_file}: {e}", file=sys.stderr)
         return None
@@ -444,7 +451,9 @@ def render_template(template_name: str, include_deps: Set[str]) -> str:
     """Render a Jinja2 template with the given dependencies to include."""
     env = get_jinja_env()
     template = env.get_template(template_name)
-    return template.render(include_deps=include_deps)
+    # Get ACTIVE_DEV_PATH_PREFIX from environment, default to empty string
+    path_prefix = os.getenv("ACTIVE_DEV_PATH_PREFIX", "")
+    return template.render(include_deps=include_deps, ACTIVE_DEV_PATH_PREFIX=path_prefix)
 
 
 def generate_dev_template(include_deps: Set[str]) -> str:

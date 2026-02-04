@@ -50,6 +50,24 @@ Projects must have:
 
 The templates should contain the `[tool.uv.sources]` section that will replace the corresponding section in each project's `pyproject.toml`.
 
+### Environment Variable Support
+
+Templates support the `ACTIVE_DEV_PATH_PREFIX` environment variable for machine-specific path configurations:
+
+- **On machines where repos are siblings** (e.g., `ACTIVE_DEV/PhoOfflineEEGAnalysis`, `ACTIVE_DEV/PhoPyLSLhelper`):
+  - Leave `ACTIVE_DEV_PATH_PREFIX` unset or set to empty string
+  - Paths will be: `../PhoPyLSLhelper`, `../PhoPyMNEHelper`, etc.
+
+- **On machines where repos are in an ACTIVE_DEV subfolder**:
+  - Set `ACTIVE_DEV_PATH_PREFIX=ACTIVE_DEV/`
+  - Paths will be: `../ACTIVE_DEV/PhoPyLSLhelper`, `../ACTIVE_DEV/PhoPyMNEHelper`, etc.
+
+In template files, use the placeholder `{ACTIVE_DEV_PATH_PREFIX}` (for plain TOML templates) or `{{ ACTIVE_DEV_PATH_PREFIX }}` (for Jinja2 templates):
+
+```toml
+phopylslhelper = { path = "../{ACTIVE_DEV_PATH_PREFIX}PhoPyLSLhelper", editable = true }
+```
+
 ## Usage
 
 ### Switch a Group
