@@ -582,7 +582,7 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "deploy-templates":
         deploy_parser = argparse.ArgumentParser(prog="uv-deps-switcher deploy-templates", description="Deploy template fragments to current project based on its dependencies")
         deploy_parser.add_argument("--dry-run", action="store_true", help="Show what would be created without making changes")
-        deploy_parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
+        deploy_parser.add_argument("-y", "--yes", "--force", action="store_true", dest="yes", help="Skip confirmation prompts (auto-confirm all actions)")
         deploy_args = deploy_parser.parse_args(sys.argv[2:])
         
         cwd = Path.cwd()
@@ -644,9 +644,10 @@ Examples:
         help="Explicit workspace root path"
     )
     parser.add_argument(
-        "--yes",
+        "-y", "--yes", "--force",
         action="store_true",
-        help="Skip confirmation prompt"
+        dest="yes",
+        help="Skip confirmation prompts (auto-confirm all actions)"
     )
     parser.add_argument(
         "--dry-run",
