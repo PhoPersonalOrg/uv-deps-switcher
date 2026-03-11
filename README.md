@@ -41,6 +41,8 @@ description = "All repos with templating"
 repos = ["PhoLogToLabStreamingLayer", "whisper-timestamped", "PhoPyLSLhelper"]
 ```
 
+Optional: `default_github_username` — when a missing dependency has no `git` URL in the release template, the tool tries to clone from `https://github.com/<username>/<repo>.git`. By default the username is taken from the **active repo's** `git remote origin` (e.g. `https://github.com/CommanderPho/emotiv-lsl.git` → `CommanderPho`). Set this key to override (e.g. for non-GitHub repos or a fixed fork).
+
 ### Project Requirements
 
 Projects must have:
@@ -132,7 +134,7 @@ This command:
 
 ### Auto-Clone Missing Dependencies
 
-When switching to dev mode, if any local dependency paths don't exist, the tool will offer to clone them from GitHub:
+When switching to dev mode, if any local dependency paths don't exist, the tool will offer to clone them from GitHub. Clone URLs come from the release template when present; for dependencies with no `git` URL in the release template, the tool uses a **default GitHub username** to build a fallback URL (`https://github.com/<username>/<repo>.git`, where `<repo>` is the last path component of the dev path). That username defaults to the active repo's remote origin (e.g. `https://github.com/CommanderPho/emotiv-lsl.git` → `CommanderPho`); you can override it with `default_github_username` in your config file.
 
 ```
 $ uv-deps-switcher dev

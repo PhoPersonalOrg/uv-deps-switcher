@@ -17,7 +17,7 @@ try:
 except ImportError:
     import tomli as tomllib
 
-from .config import find_config_file, get_group_repos, list_groups, load_config
+from .config import find_config_file, get_default_github_username, get_group_repos, list_groups, load_config
 
 
 class PackageTemplateLoader(BaseLoader):
@@ -109,7 +109,7 @@ def clone_dependency(git_url: str, target_path: Path, dry_run: bool = False) -> 
         return False
 
 
-def check_and_clone_missing_deps(project_path: Path, dev_template: str, release_template: str, dry_run: bool = False, auto_yes: bool = False, no_clone: bool = False) -> bool:
+def check_and_clone_missing_deps(project_path: Path, dev_template: str, release_template: str, dry_run: bool = False, auto_yes: bool = False, no_clone: bool = False, default_github_username: Optional[str] = None) -> bool:
     """Check for missing dependencies and offer to clone them. Returns True if ready to proceed."""
     if no_clone:
         return True
@@ -117,6 +117,9 @@ def check_and_clone_missing_deps(project_path: Path, dev_template: str, release_
     # Extract paths and URLs from templates
     dev_paths = extract_dev_paths(dev_template)
     git_urls = extract_git_urls(release_template)
+    
+    # Resolve effective default GitHub username: config/arg override, else from active repo origin
+    effective_username = default_github_username if default_github_username and default_github_username.strip() else get_github_username_from_origin(project_path)
     
     # Find missing paths
     missing = find_missing_dependencies(project_path, dev_paths)
@@ -132,6 +135,11 @@ def check_and_clone_missing_deps(project_path: Path, dev_template: str, release_
         if dep_name in git_urls:
             print(f"    - {dep_name} -> {rel_path} (not found)")
             cloneable.append((dep_name, rel_path, git_urls[dep_name]))
+        elif effective_username:
+            repo_name = Path(rel_path).name
+            fallback_url = f"https://github.com/{effective_username}/{repo_name}.git"
+            print(f"    - {dep_name} -> {rel_path} (not found, inferred from origin)")
+            cloneable.append((dep_name, rel_path, fallback_url))
         else:
             print(f"    - {dep_name} -> {rel_path} (not found, no git URL available)")
     
@@ -438,6 +446,15 @@ def get_git_remote_url(repo_path: Path) -> Optional[str]:
         return None
 
 
+def get_github_username_from_origin(repo_path: Path) -> Optional[str]:
+    """Extract GitHub username from the repo's origin URL (e.g. https://github.com/CommanderPho/emotiv-lsl.git -> CommanderPho)."""
+    url = get_git_remote_url(repo_path)
+    if not url or "github.com" not in url:
+        return None
+    match = re.search(r"github\.com[/:]([^/]+)", url)
+    return match.group(1) if match else None
+
+
 def filter_sources_by_dependencies(sources: Dict[str, dict], dependencies: Set[str]) -> Dict[str, dict]:
     """Filter sources dict to only include entries that match project dependencies."""
     filtered = {}
@@ -632,8 +649,9 @@ def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: 
         if mode == "dev":
             release_template = read_template(repo_path, "release")
             if release_template:
-                check_and_clone_missing_deps(repo_path, template_content, release_template, dry_run=dry_run, auto_yes=auto_yes, no_clone=no_clone)
-
+                default_username = get_default_github_username()
+                check_and_clone_missing_deps(repo_path, template_content, release_template, dry_run=dry_run, auto_yes=auto_yes, no_clone=no_clone, default_github_username=default_username)
+        
         if update_pyproject_sources(pyproject_path, template_content, dry_run=dry_run):
             if not dry_run:
                 print(f"  Updated {repo_name} to {mode} mode")

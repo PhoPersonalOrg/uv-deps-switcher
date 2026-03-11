@@ -47,6 +47,21 @@ def load_config(config_path: Optional[Path] = None) -> Dict:
         return {}
 
 
+def get_default_github_username(config_path: Optional[Path] = None) -> Optional[str]:
+    """Return default_github_username from config if set; otherwise None. Used as fallback when cloning deps with no git URL in release template."""
+    if config_path is None:
+        config_path = find_config_file(Path.cwd())
+    if config_path is None or not config_path.exists():
+        return None
+    try:
+        with open(config_path, "rb") as f:
+            config = tomllib.load(f)
+        value = config.get("default_github_username")
+        return value if isinstance(value, str) and value.strip() else None
+    except Exception:
+        return None
+
+
 def get_group_repos(groups: Dict, group_name: str) -> Optional[List[str]]:
     """Get list of repos for a specific group."""
     if group_name not in groups:
