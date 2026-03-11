@@ -1,0 +1,25 @@
+[tool.uv.sources]
+{%- if 'lab-recorder-python' in include_deps %}
+lab-recorder-python = { workspace = true }
+{%- endif %}
+{%- if 'whisper-timestamped' in include_deps %}
+whisper-timestamped = { workspace = true }
+{%- endif %}
+{%- if 'phopylslhelper' in include_deps %}
+phopylslhelper = { workspace = true }
+{%- endif %}
+{%- if 'phopymnehelper' in include_deps %}
+phopymnehelper = { workspace = true }
+{%- endif %}
+{%- if 'phopyqthelper' in include_deps %}
+phopyqthelper = { workspace = true }
+{%- endif %}
+{%- if 'pyphoplacecellanalysis' in include_deps %}
+pyphoplacecellanalysis = { workspace = true }
+{%- endif %}
+{%- if 'neuropy' in include_deps %}
+neuropy = { workspace = true }
+{%- endif %}
+{%- if 'pyphocorehelpers' in include_deps %}
+pyphocorehelpers = { workspace = true }
+{%- endif %}

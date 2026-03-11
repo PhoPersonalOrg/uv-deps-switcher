@@ -466,6 +466,45 @@ def generate_release_template(include_deps: Set[str]) -> str:
     return render_template("pyproject_template_release.toml_fragment.j2", include_deps)
 
 
+def generate_workspace_template(include_deps: Set[str]) -> str:
+    """Generate workspace template fragment using Jinja2 template."""
+    return render_template("pyproject_template_workspace.toml_fragment.j2", include_deps)
+
+
+def generate_workspace_fragment_from_templates(project_path: Path) -> Optional[str]:
+    """Generate a workspace fragment from existing dev and release fragments.
+
+    For each dep that has a local path in the dev fragment, emits `dep = { workspace = true }`.
+    All other entries (git-pinned tools/libs) are preserved unchanged from the release fragment.
+    Returns the fragment string, or None if dev/release fragments are missing or empty.
+    """
+    dev_content = read_template(project_path, "dev")
+    release_content = read_template(project_path, "release")
+    if not dev_content or not release_content:
+        return None
+
+    workspace_keys = set(extract_dev_paths(dev_content).keys())
+    if not workspace_keys:
+        return None
+
+    release_lines = release_content.strip().split("\n")
+    emitted_workspace_keys: Set[str] = set()
+    output_lines: List[str] = []
+
+    for line in release_lines:
+        key = extract_source_key(line)
+        if key and key in workspace_keys:
+            output_lines.append(f"{key} = {{ workspace = true }}")
+            emitted_workspace_keys.add(key)
+        else:
+            output_lines.append(line)
+
+    for key in workspace_keys - emitted_workspace_keys:
+        output_lines.append(f"{key} = {{ workspace = true }}")
+
+    return "\n".join(output_lines) + "\n"
+
+
 def deploy_templates(project_path: Path, dry_run: bool = False) -> bool:
     """Deploy template fragments to a project based on its current dependencies and sources."""
     pyproject_path = project_path / "pyproject.toml"
@@ -498,67 +537,103 @@ def deploy_templates(project_path: Path, dry_run: bool = False) -> bool:
     # Generate templates using Jinja2
     dev_template = generate_dev_template(include_deps)
     release_template = generate_release_template(include_deps)
-    
+    workspace_template = generate_workspace_template(include_deps)
+
     # Show what will be created
     print(f"Deploying templates to {project_path.name}...")
     print(f"  Dependencies to include: {', '.join(sorted(include_deps))}")
-    
+
     if dry_run:
         print("\n[DRY RUN] Would create:")
         print(f"  templating/pyproject_template_dev.toml_fragment")
         print(f"  templating/pyproject_template_release.toml_fragment")
+        print(f"  templating/pyproject_template_workspace.toml_fragment")
         print("\nDev template content:")
         print(dev_template)
         print("Release template content:")
         print(release_template)
+        print("Workspace template content:")
+        print(workspace_template)
         return True
-    
+
     # Create templating directory if it doesn't exist
     templating_dir = project_path / "templating"
     templating_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Write templates
     dev_path = templating_dir / "pyproject_template_dev.toml_fragment"
     release_path = templating_dir / "pyproject_template_release.toml_fragment"
-    
+    workspace_path = templating_dir / "pyproject_template_workspace.toml_fragment"
+
     try:
         dev_path.write_text(dev_template, encoding="utf-8")
         release_path.write_text(release_template, encoding="utf-8")
+        workspace_path.write_text(workspace_template, encoding="utf-8")
         print(f"  Created {dev_path}")
         print(f"  Created {release_path}")
+        print(f"  Created {workspace_path}")
         return True
     except Exception as e:
         print(f"Error writing templates: {e}", file=sys.stderr)
         return False
 
 
+def ensure_workspace_fragment(repo_path: Path, dry_run: bool = False) -> Optional[str]:
+    """Ensure a workspace fragment exists for repo_path, generating it from dev+release if needed.
+
+    Returns the fragment content string if available (either pre-existing or freshly generated),
+    or None if it could not be produced.
+    """
+    workspace_file = repo_path / "templating" / "pyproject_template_workspace.toml_fragment"
+    if workspace_file.exists():
+        return read_template(repo_path, "workspace")
+
+    content = generate_workspace_fragment_from_templates(repo_path)
+    if content is None:
+        return None
+
+    if dry_run:
+        print(f"  [DRY RUN] Would generate workspace fragment at {workspace_file}")
+        return content
+
+    templating_dir = repo_path / "templating"
+    templating_dir.mkdir(parents=True, exist_ok=True)
+    workspace_file.write_text(content, encoding="utf-8")
+    print(f"  Generated workspace fragment: {workspace_file}")
+    return content
+
+
 def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: bool = False, no_clone: bool = False) -> int:
     """Switch dependencies for a list of repos."""
     success_count = 0
     fail_count = 0
-    
+
     for repo_path in repos:
         repo_name = repo_path.name
         print(f"Processing {repo_name}...")
-        
-        template_content = read_template(repo_path, mode)
+
+        if mode == "workspace":
+            template_content = ensure_workspace_fragment(repo_path, dry_run=dry_run)
+        else:
+            template_content = read_template(repo_path, mode)
+
         if template_content is None:
             print(f"  Error: Could not read template for {repo_name}", file=sys.stderr)
             fail_count += 1
             continue
-        
+
         pyproject_path = repo_path / "pyproject.toml"
         if not pyproject_path.exists():
             print(f"  Warning: {pyproject_path} does not exist, skipping", file=sys.stderr)
             fail_count += 1
             continue
-        
+
         # For dev mode, check for missing dependencies and offer to clone
         if mode == "dev":
             release_template = read_template(repo_path, "release")
             if release_template:
                 check_and_clone_missing_deps(repo_path, template_content, release_template, dry_run=dry_run, auto_yes=auto_yes, no_clone=no_clone)
-        
+
         if update_pyproject_sources(pyproject_path, template_content, dry_run=dry_run):
             if not dry_run:
                 print(f"  Updated {repo_name} to {mode} mode")
@@ -566,7 +641,7 @@ def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: 
         else:
             print(f"  Error: Failed to update {repo_name}", file=sys.stderr)
             fail_count += 1
-    
+
     return fail_count
 
 
@@ -611,19 +686,21 @@ def main():
 Examples:
   uv-deps-switcher dev                              # Switch current project (if valid)
   uv-deps-switcher release                          # Switch current project to release mode
+  uv-deps-switcher workspace                        # Switch current project to workspace mode (monorepo)
   uv-deps-switcher dev --group main                 # Switch all repos in a group
   uv-deps-switcher release --group main
+  uv-deps-switcher workspace --all                  # Switch all repos to workspace mode
   uv-deps-switcher dev --all                        # Switch all detected repos
   uv-deps-switcher dev --repo PhoLogToLabStreamingLayer
   uv-deps-switcher list-groups
   uv-deps-switcher deploy-templates                 # Deploy templates to current project
         """
     )
-    
+
     parser.add_argument(
         "mode",
-        choices=["dev", "release"],
-        help="Mode to switch to: dev (local editable) or release (git)"
+        choices=["dev", "release", "workspace"],
+        help="Mode to switch to: dev (local editable paths), release (git), or workspace (uv monorepo, { workspace = true })"
     )
     parser.add_argument(
         "--group",

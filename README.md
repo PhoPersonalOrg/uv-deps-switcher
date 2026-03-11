@@ -47,6 +47,7 @@ Projects must have:
 - A `templating/` directory containing:
   - `pyproject_template_dev.toml_fragment` - Dev mode template (local editable paths)
   - `pyproject_template_release.toml_fragment` - Release mode template (git URLs)
+- Add `templating/uv_deps_switcher/backups/` to your repo's `.gitignore` so pyproject.toml backups are not committed.
 
 The templates should contain the `[tool.uv.sources]` section that will replace the corresponding section in each project's `pyproject.toml`.
 
