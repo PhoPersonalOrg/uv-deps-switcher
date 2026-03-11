@@ -1,5 +1,7 @@
 """Configuration file parsing for repo groups."""
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -60,6 +62,27 @@ def get_default_github_username(config_path: Optional[Path] = None) -> Optional[
         return value if isinstance(value, str) and value.strip() else None
     except Exception:
         return None
+
+
+def get_github_username_from_git_config() -> Optional[str]:
+    """Return the GitHub username from `git config --global github.user`, or None if not set."""
+    try:
+        result = subprocess.run(["git", "config", "--global", "github.user"], capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            value = result.stdout.strip()
+            return value if value else None
+        return None
+    except Exception:
+        return None
+
+
+def get_github_username_from_env() -> Optional[str]:
+    """Return the GitHub username from environment variables (GITHUB_USERNAME, GH_USER, GITHUB_USER), or None."""
+    for var in ("GITHUB_USERNAME", "GH_USER", "GITHUB_USER"):
+        value = os.getenv(var, "").strip()
+        if value:
+            return value
+    return None
 
 
 def get_group_repos(groups: Dict, group_name: str) -> Optional[List[str]]:

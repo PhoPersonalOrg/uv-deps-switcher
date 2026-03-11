@@ -17,7 +17,7 @@ try:
 except ImportError:
     import tomli as tomllib
 
-from .config import find_config_file, get_default_github_username, get_group_repos, list_groups, load_config
+from .config import find_config_file, get_default_github_username, get_github_username_from_env, get_github_username_from_git_config, get_group_repos, list_groups, load_config
 
 
 class PackageTemplateLoader(BaseLoader):
@@ -118,8 +118,7 @@ def check_and_clone_missing_deps(project_path: Path, dev_template: str, release_
     dev_paths = extract_dev_paths(dev_template)
     git_urls = extract_git_urls(release_template)
     
-    # Resolve effective default GitHub username: config/arg override, else from active repo origin
-    effective_username = default_github_username if default_github_username and default_github_username.strip() else get_github_username_from_origin(project_path)
+    effective_username = resolve_github_username(project_path, config_override=default_github_username)
     
     # Find missing paths
     missing = find_missing_dependencies(project_path, dev_paths)
@@ -453,6 +452,26 @@ def get_github_username_from_origin(repo_path: Path) -> Optional[str]:
         return None
     match = re.search(r"github\.com[/:]([^/]+)", url)
     return match.group(1) if match else None
+
+
+def resolve_github_username(project_path: Path, config_override: Optional[str] = None) -> Optional[str]:
+    """Resolve the GitHub username to use for cloning missing dependencies.
+
+    Priority chain (highest to lowest):
+    1. config_override — explicit value from .uv-deps-switcher.toml
+    2. git remote origin URL of project_path — e.g. https://github.com/CommanderPho/repo.git → CommanderPho
+    3. git config --global github.user — common GitHub CLI / git convention
+    4. Environment variables: GITHUB_USERNAME, GH_USER, GITHUB_USER
+    """
+    if config_override and config_override.strip():
+        return config_override.strip()
+    origin_username = get_github_username_from_origin(project_path)
+    if origin_username:
+        return origin_username
+    git_config_username = get_github_username_from_git_config()
+    if git_config_username:
+        return git_config_username
+    return get_github_username_from_env()
 
 
 def filter_sources_by_dependencies(sources: Dict[str, dict], dependencies: Set[str]) -> Dict[str, dict]:
