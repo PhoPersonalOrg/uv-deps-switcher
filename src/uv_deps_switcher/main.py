@@ -177,6 +177,30 @@ def extract_source_key(line: str) -> Optional[str]:
     return None
 
 
+def ensure_backup_dir_gitignored(project_path: Path) -> None:
+    """Add the uv_deps_switcher backups folder to the project's .gitignore if not already present."""
+    gitignore_path = project_path / ".gitignore"
+    # The pattern we want to ensure is present
+    pattern = "**/templating/uv_deps_switcher/backups"
+
+    # Read existing content (or start fresh if the file doesn't exist)
+    if gitignore_path.exists():
+        existing = gitignore_path.read_text(encoding="utf-8")
+    else:
+        existing = ""
+
+    # Check whether the pattern is already covered (exact line match)
+    lines = existing.splitlines()
+    if any(line.strip() == pattern for line in lines):
+        return  # Already present, nothing to do
+
+    # Append the pattern under a descriptive comment block
+    addition = "\n# uv-deps-switcher\n" + pattern + "\n"
+    with gitignore_path.open("a", encoding="utf-8") as f:
+        f.write(addition)
+    print(f"  Added '{pattern}' to {gitignore_path}")
+
+
 def find_workspace_root(start_path: Path) -> Optional[Path]:
     """Find workspace root by looking for .code-workspace, .vscode, or ACTIVE_DEV."""
     current = start_path.resolve()
@@ -352,6 +376,7 @@ def update_pyproject_sources(pyproject_path: Path, template_content: str, dry_ru
         # Save backup before writing changes
         backup_dir = pyproject_path.parent / "templating" / "uv_deps_switcher" / "backups"
         backup_dir.mkdir(parents=True, exist_ok=True)
+        ensure_backup_dir_gitignored(pyproject_path.parent)
         shutil.copy2(pyproject_path, backup_dir / "pyproject.toml.bak")
         
         # Write updated content
