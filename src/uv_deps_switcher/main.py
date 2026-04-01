@@ -269,6 +269,67 @@ def read_template(project_path: Path, mode: str) -> Optional[str]:
         return None
 
 
+# Built-in modes that are always recognised regardless of templating folder contents.
+BUILTIN_MODES: Set[str] = {"dev", "release", "workspace"}
+
+
+def discover_custom_modes(project_path: Path) -> List[str]:
+    """Scan a project's templating/ folder for extra mode templates.
+
+    Any file named ``pyproject_template_<name>.toml_fragment`` that is *not*
+    one of the built-in modes (dev, release, workspace) is treated as a custom
+    dev mode named ``<name>``.
+
+    Returns a sorted list of custom mode names (e.g. ['kdiba', 'staging']).
+    """
+    templating_dir = project_path / "templating"
+    if not templating_dir.exists() or not templating_dir.is_dir():
+        return []
+
+    custom: List[str] = []
+    prefix = "pyproject_template_"
+    suffix = ".toml_fragment"
+    for f in templating_dir.iterdir():
+        if not f.is_file():
+            continue
+        name = f.name
+        if name.startswith(prefix) and name.endswith(suffix):
+            mode = name[len(prefix):-len(suffix)]
+            if mode and mode not in BUILTIN_MODES:
+                custom.append(mode)
+    return sorted(custom)
+
+
+def is_dev_like_mode(mode: str, project_path: Path) -> bool:
+    """Return True if *mode* uses local editable paths (i.e. contains path = entries).
+
+    Built-in 'dev' mode is always dev-like.  For custom modes the template
+    content is inspected: if it contains any ``path =`` entries it is treated as
+    dev-like and clone-checking will be applied.
+    """
+    if mode == "dev":
+        return True
+    content = read_template(project_path, mode)
+    if content is None:
+        return False
+    return bool(extract_dev_paths(content))
+
+
+def get_valid_modes(project_path: Optional[Path] = None) -> List[str]:
+    """Return the full list of accepted mode names for *project_path*.
+
+    Always includes the three built-in modes.  If *project_path* is provided
+    any custom modes discovered in that project's templating/ folder are
+    appended.
+    """
+    modes = sorted(BUILTIN_MODES)
+    if project_path is not None:
+        custom = discover_custom_modes(project_path)
+        modes = modes + [m for m in custom if m not in modes]
+    return modes
+
+
+
 def update_pyproject_sources(pyproject_path: Path, template_content: str, dry_run: bool = False) -> bool:
     """Update [tool.uv.sources] section in pyproject.toml, merging template items with existing entries."""
     if not pyproject_path.exists():
@@ -689,13 +750,14 @@ def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: 
             fail_count += 1
             continue
 
-        # For dev mode, check for missing dependencies and offer to clone
-        if mode == "dev":
+        # For dev-like modes (built-in 'dev' or custom modes with local paths),
+        # check for missing dependencies and offer to clone them.
+        if is_dev_like_mode(mode, repo_path):
             release_template = read_template(repo_path, "release")
             if release_template:
                 default_username = get_default_github_username()
                 check_and_clone_missing_deps(repo_path, template_content, release_template, dry_run=dry_run, auto_yes=auto_yes, no_clone=no_clone, default_github_username=default_username)
-        
+
         if update_pyproject_sources(pyproject_path, template_content, dry_run=dry_run):
             if not dry_run:
                 print(f"  Updated {repo_name} to {mode} mode")
@@ -714,7 +776,19 @@ def main():
         groups = load_config()
         list_groups(groups)
         return 0
-    
+
+    # Handle list-modes command: show built-in + any custom modes for cwd
+    if len(sys.argv) > 1 and sys.argv[1] == "list-modes":
+        cwd = Path.cwd()
+        builtin = sorted(BUILTIN_MODES)
+        custom = discover_custom_modes(cwd)
+        print("Built-in modes: " + ", ".join(builtin))
+        if custom:
+            print("Custom modes (from templating/ folder): " + ", ".join(custom))
+        else:
+            print("Custom modes: (none found in templating/ folder)")
+        return 0
+
     # Handle deploy-templates command separately
     if len(sys.argv) > 1 and sys.argv[1] == "deploy-templates":
         deploy_parser = argparse.ArgumentParser(prog="uv-deps-switcher deploy-templates", description="Deploy template fragments to current project based on its dependencies")
@@ -741,6 +815,11 @@ def main():
             return 0
         return 1
     
+    # Collect custom modes from cwd so we can show them in help text.
+    _cwd_for_modes = Path.cwd()
+    _custom_modes = discover_custom_modes(_cwd_for_modes)
+    _all_mode_names = sorted(BUILTIN_MODES) + _custom_modes
+
     parser = argparse.ArgumentParser(
         description="Switch UV dependency sources between dev and release configurations",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -749,20 +828,29 @@ Examples:
   uv-deps-switcher dev                              # Switch current project (if valid)
   uv-deps-switcher release                          # Switch current project to release mode
   uv-deps-switcher workspace                        # Switch current project to workspace mode (monorepo)
+  uv-deps-switcher kdiba                            # Switch using a custom mode template
   uv-deps-switcher dev --group main                 # Switch all repos in a group
   uv-deps-switcher release --group main
   uv-deps-switcher workspace --all                  # Switch all repos to workspace mode
   uv-deps-switcher dev --all                        # Switch all detected repos
   uv-deps-switcher dev --repo PhoLogToLabStreamingLayer
   uv-deps-switcher list-groups
+  uv-deps-switcher list-modes                       # List built-in and custom modes
   uv-deps-switcher deploy-templates                 # Deploy templates to current project
         """
     )
 
+    _mode_help = (
+        "Mode to switch to: dev (local editable paths), release (git URLs), "
+        "workspace (uv monorepo, { workspace = true }), or any custom mode "
+        "defined by a pyproject_template_<name>.toml_fragment file in the "
+        "project's templating/ folder (e.g. 'kdiba' for "
+        "pyproject_template_kdiba.toml_fragment). "
+        + (f"Custom modes detected in cwd: {', '.join(_custom_modes)}." if _custom_modes else "No custom modes detected in cwd.")
+    )
     parser.add_argument(
         "mode",
-        choices=["dev", "release", "workspace"],
-        help="Mode to switch to: dev (local editable paths), release (git), or workspace (uv monorepo, { workspace = true })"
+        help=_mode_help,
     )
     parser.add_argument(
         "--group",
@@ -800,10 +888,25 @@ Examples:
     )
     
     args = parser.parse_args()
-    
+
+    # Validate mode: must be a built-in or a custom mode discoverable from each
+    # project.  We do a pre-flight check against cwd and the known built-ins;
+    # per-project validation happens naturally when read_template returns None.
+    if args.mode not in BUILTIN_MODES and args.mode not in _custom_modes:
+        # Allow it if there's no project-level templating dir yet (workspace
+        # mode, --all, --group flows will validate per-project), but warn when
+        # it looks clearly wrong (not matching the filename convention).
+        import re as _re
+        if not _re.match(r'^[a-zA-Z0-9_\-]+$', args.mode):
+            print(f"Error: '{args.mode}' is not a valid mode name.", file=sys.stderr)
+            print(f"Built-in modes: {', '.join(sorted(BUILTIN_MODES))}", file=sys.stderr)
+            if _custom_modes:
+                print(f"Custom modes (cwd): {', '.join(_custom_modes)}", file=sys.stderr)
+            return 1
+
     # Determine which repos to switch
     repos_to_switch = []
-    
+
     # Check if running in local project mode (no flags, current dir is valid project)
     if not args.all and not args.group and not args.repo:
         cwd = Path.cwd()

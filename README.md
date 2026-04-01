@@ -55,7 +55,21 @@ Projects must have:
 - A `templating/` directory containing:
   - `pyproject_template_dev.toml_fragment` - Dev mode template (local editable paths)
   - `pyproject_template_release.toml_fragment` - Release mode template (git URLs)
-- Add `templating/uv_deps_switcher/backups/` to your repo's `.gitignore` so pyproject.toml backups are not committed.
+  - *(optional)* Any additional `pyproject_template_<name>.toml_fragment` files are automatically detected as **custom modes** named `<name>` (e.g. `pyproject_template_kdiba.toml_fragment` → mode `kdiba`).
+- Add `templating/uv_deps_switcher/backups/` to your repo's `.gitignore` so pyproject.toml backups are not committed (the tool does this automatically on first run).
+
+#### Custom Modes
+
+Drop any extra `pyproject_template_<name>.toml_fragment` file into a project's `templating/` folder and it becomes a custom mode:
+
+```
+templating/
+  pyproject_template_dev.toml_fragment      ← built-in
+  pyproject_template_release.toml_fragment  ← built-in
+  pyproject_template_kdiba.toml_fragment    ← custom mode 'kdiba'
+```
+
+Custom modes behave like `dev` mode (local paths, clone-checking) if their template contains `path =` entries, or like `release` mode otherwise. Run `uv-deps-switcher list-modes` from inside a project to see which custom modes are available.
 
 The templates should contain the `[tool.uv.sources]` section that will replace the corresponding section in each project's `pyproject.toml`.
 
@@ -118,6 +132,18 @@ uv-deps-switcher release  # Switch current project to release mode
 ```
 
 This is useful for quickly switching a single project without needing to specify groups or repo names.
+
+### Custom Modes
+
+If a project has additional template files such as `templating/pyproject_template_kdiba.toml_fragment`, they are automatically available as custom modes:
+
+```bash
+cd /path/to/my-project
+uv-deps-switcher kdiba        # Apply custom 'kdiba' template
+uv-deps-switcher list-modes   # Show all built-in and custom modes for this project
+```
+
+Custom modes work with all the same flags (`--group`, `--all`, `--repo`, `--dry-run`, etc.). If the custom template contains `path =` entries the tool will perform the same missing-dependency clone-check as `dev` mode.
 
 ### Deploy Templates to Current Project
 
