@@ -41,6 +41,14 @@ description = "All repos with templating"
 repos = ["PhoLogToLabStreamingLayer", "whisper-timestamped", "PhoPyLSLhelper"]
 ```
 
+Optional: `default_github_username` — when a missing dependency has no `git` URL in the release template, the tool resolves a GitHub username via the following priority chain:
+1. `default_github_username` in this config file (explicit override — highest priority)
+2. The active repo's `git remote origin` URL (e.g. `https://github.com/CommanderPho/repo.git` → `CommanderPho`)
+3. `git config --global github.user` (common GitHub CLI / git convention)
+4. Environment variables: `GITHUB_USERNAME`, `GH_USER`, or `GITHUB_USER`
+
+Set `default_github_username` to override all automatic detection (e.g. for a fixed fork or non-GitHub host).
+
 ### Project Requirements
 
 Projects must have:
@@ -132,7 +140,12 @@ This command:
 
 ### Auto-Clone Missing Dependencies
 
-When switching to dev mode, if any local dependency paths don't exist, the tool will offer to clone them from GitHub:
+When switching to dev mode, if any local dependency paths don't exist, the tool will offer to clone them from GitHub. Clone URLs come from the release template when present; for dependencies with no `git` URL in the release template, the tool builds a fallback URL (`https://github.com/<username>/<repo>.git`, where `<repo>` is the last path component of the dev path) using a username resolved from the following priority chain:
+
+1. `default_github_username` in `.uv-deps-switcher.toml` (explicit override)
+2. The active repo's `git remote origin` URL (e.g. `https://github.com/CommanderPho/emotiv-lsl.git` → `CommanderPho`)
+3. `git config --global github.user` (common GitHub CLI / git convention — set via `git config --global github.user YourUsername`)
+4. Environment variables: `GITHUB_USERNAME`, `GH_USER`, or `GITHUB_USER`
 
 ```
 $ uv-deps-switcher dev

@@ -1,5 +1,7 @@
 """Configuration file parsing for repo groups."""
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -45,6 +47,42 @@ def load_config(config_path: Optional[Path] = None) -> Dict:
     except Exception as e:
         print(f"Warning: Could not load config file {config_path}: {e}", file=sys.stderr)
         return {}
+
+
+def get_default_github_username(config_path: Optional[Path] = None) -> Optional[str]:
+    """Return default_github_username from config if set; otherwise None. Used as fallback when cloning deps with no git URL in release template."""
+    if config_path is None:
+        config_path = find_config_file(Path.cwd())
+    if config_path is None or not config_path.exists():
+        return None
+    try:
+        with open(config_path, "rb") as f:
+            config = tomllib.load(f)
+        value = config.get("default_github_username")
+        return value if isinstance(value, str) and value.strip() else None
+    except Exception:
+        return None
+
+
+def get_github_username_from_git_config() -> Optional[str]:
+    """Return the GitHub username from `git config --global github.user`, or None if not set."""
+    try:
+        result = subprocess.run(["git", "config", "--global", "github.user"], capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            value = result.stdout.strip()
+            return value if value else None
+        return None
+    except Exception:
+        return None
+
+
+def get_github_username_from_env() -> Optional[str]:
+    """Return the GitHub username from environment variables (GITHUB_USERNAME, GH_USER, GITHUB_USER), or None."""
+    for var in ("GITHUB_USERNAME", "GH_USER", "GITHUB_USER"):
+        value = os.getenv(var, "").strip()
+        if value:
+            return value
+    return None
 
 
 def get_group_repos(groups: Dict, group_name: str) -> Optional[List[str]]:
