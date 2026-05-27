@@ -913,12 +913,33 @@ Examples:
         if is_valid_project(cwd):
             repos_to_switch = [cwd]
         else:
-            print("Error: Must specify --group, --all, or --repo, or run from within a valid project folder", file=sys.stderr)
-            if (cwd / "pyproject.toml").exists():
-                print("Hint: Run `uv-deps-switcher deploy-templates` to create the required templating/ files.", file=sys.stderr)
-            else:
+            pyproject_path = cwd / "pyproject.toml"
+            if not pyproject_path.exists():
+                print("Error: Must specify --group, --all, or --repo, or run from within a valid project folder", file=sys.stderr)
                 print("Hint: cd to a UV project (with pyproject.toml) and run `uv-deps-switcher deploy-templates` to set up.", file=sys.stderr)
-            return 1
+                return 1
+            print("Error: Must specify --group, --all, or --repo, or run from within a valid project folder", file=sys.stderr)
+            should_deploy = args.yes
+            if not should_deploy:
+                deploy_prompt = f"Deploy templates to {cwd.name}"
+                if args.dry_run:
+                    deploy_prompt += " (dry run)"
+                response = input(f"{deploy_prompt}? [y/N]: ")
+                should_deploy = response.lower() in ["y", "yes"]
+            if should_deploy:
+                if deploy_templates(cwd, dry_run=args.dry_run):
+                    if args.dry_run:
+                        print("Hint: Re-run without --dry-run to create templates, then run your switch command again.", file=sys.stderr)
+                        return 1
+                    if is_valid_project(cwd):
+                        repos_to_switch = [cwd]
+                    else:
+                        return 1
+                else:
+                    return 1
+            else:
+                print("Hint: Run `uv-deps-switcher deploy-templates` to create the required templating/ files.", file=sys.stderr)
+                return 1
     else:
         # Need workspace root for --all, --group, or --repo modes
         if args.workspace_root:
