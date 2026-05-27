@@ -914,6 +914,10 @@ Examples:
             repos_to_switch = [cwd]
         else:
             print("Error: Must specify --group, --all, or --repo, or run from within a valid project folder", file=sys.stderr)
+            if (cwd / "pyproject.toml").exists():
+                print("Hint: Run `uv-deps-switcher deploy-templates` to create the required templating/ files.", file=sys.stderr)
+            else:
+                print("Hint: cd to a UV project (with pyproject.toml) and run `uv-deps-switcher deploy-templates` to set up.", file=sys.stderr)
             return 1
     else:
         # Need workspace root for --all, --group, or --repo modes
