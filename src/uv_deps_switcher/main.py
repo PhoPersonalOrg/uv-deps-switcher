@@ -102,13 +102,7 @@ def is_commit_sha(rev: str) -> bool:
     return bool(re.fullmatch(r"[0-9a-fA-F]{7,40}", rev))
 
 
-def clone_dependency(
-    git_url: str,
-    target_path: Path,
-    rev: Optional[str] = None,
-    dry_run: bool = False,
-    replace_existing: bool = False,
-) -> bool:
+def clone_dependency(git_url: str, target_path: Path, rev: Optional[str] = None, dry_run: bool = False, replace_existing: bool = False) -> bool:
     """Clone a git repository to the specified path."""
     clone_rev = normalize_clone_rev(rev) if rev else None
     checkout_after_clone = clone_rev if clone_rev and is_commit_sha(clone_rev) else None
@@ -164,16 +158,7 @@ def clone_dependency(
         return False
 
 
-def check_and_clone_missing_deps(
-    project_path: Path,
-    dev_template: str,
-    release_template: str,
-    dry_run: bool = False,
-    auto_yes: bool = False,
-    no_clone: bool = False,
-    default_github_username: Optional[str] = None,
-    replace_repos: bool = False,
-) -> bool:
+def check_and_clone_missing_deps(project_path: Path, dev_template: str, release_template: str, dry_run: bool = False, auto_yes: bool = False, no_clone: bool = False, default_github_username: Optional[str] = None, replace_repos: bool = False) -> bool:
     """Check for missing dependencies and offer to clone them. Returns True if ready to proceed."""
     if no_clone:
         return True
@@ -227,7 +212,10 @@ def check_and_clone_missing_deps(
     # Ask user if they want to clone
     if not dry_run and not auto_yes:
         if replace_repos:
-            response = input(f"\n  Remove and re-clone {len(cloneable)} repo(s)? This deletes existing directories. [y/N]: ")
+            response = input(
+                f"\n  Remove and re-clone {len(cloneable)} repo(s)? "
+                "This deletes existing directories. [y/N]: "
+            )
         else:
             response = input(f"\n  Clone {len(cloneable)} missing repo(s) from GitHub? [y/N]: ")
         if response.lower() not in ["y", "yes"]:
@@ -241,7 +229,13 @@ def check_and_clone_missing_deps(
     all_success = True
     for dep_name, rel_path, git_url, rev in cloneable:
         target_path = resolve_dependency_path(project_path, rel_path)
-        if not clone_dependency(git_url, target_path, rev=rev, dry_run=dry_run, replace_existing=replace_repos):
+        if not clone_dependency(
+            git_url,
+            target_path,
+            rev=rev,
+            dry_run=dry_run,
+            replace_existing=replace_repos,
+        ):
             all_success = False
     
     return all_success
@@ -857,15 +851,7 @@ def ensure_workspace_fragment(repo_path: Path, dry_run: bool = False, path_prefi
     return content
 
 
-def switch_repos(
-    repos: List[Path],
-    mode: str,
-    dry_run: bool = False,
-    auto_yes: bool = False,
-    no_clone: bool = False,
-    path_prefix_override: Optional[str] = None,
-    replace_repos: bool = False,
-) -> int:
+def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: bool = False, no_clone: bool = False, path_prefix_override: Optional[str] = None, replace_repos: bool = False) -> int:
     """Switch dependencies for a list of repos."""
     success_count = 0
     fail_count = 0
