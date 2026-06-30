@@ -262,15 +262,19 @@ def find_active_dev_dir(start_path: Path) -> Optional[Path]:
     return None
 
 
-def get_active_dev_path_prefix(project_path: Optional[Path] = None) -> str:
+def get_active_dev_path_prefix(project_path: Optional[Path] = None, override: Optional[str] = None) -> str:
     """Resolve ACTIVE_DEV_PATH_PREFIX for template substitution.
 
     Priority:
-    1. ``ACTIVE_DEV_PATH_PREFIX`` environment variable when explicitly set
+    1. Explicit ``--checkout-dest`` override, when provided
+    2. ``ACTIVE_DEV_PATH_PREFIX`` environment variable when explicitly set
        (including empty string — used for sibling-relative ``../`` templates)
-    2. Auto-detect the nearest ``ACTIVE_DEV`` ancestor of *project_path*
-    3. Empty string
+    3. Auto-detect the nearest ``ACTIVE_DEV`` ancestor of *project_path*
+    4. Empty string
     """
+    if override is not None:
+        return override
+
     if "ACTIVE_DEV_PATH_PREFIX" in os.environ:
         return os.environ["ACTIVE_DEV_PATH_PREFIX"]
 
@@ -314,7 +318,7 @@ def find_projects_with_templating(workspace_root: Path) -> List[Path]:
     return projects
 
 
-def read_template(project_path: Path, mode: str) -> Optional[str]:
+def read_template(project_path: Path, mode: str, path_prefix_override: Optional[str] = None) -> Optional[str]:
     """Read template file for a project and process environment variable placeholders."""
     template_file = project_path / "templating" / f"pyproject_template_{mode}.toml_fragment"
     
@@ -328,7 +332,7 @@ def read_template(project_path: Path, mode: str) -> Optional[str]:
         # Get ACTIVE_DEV_PATH_PREFIX from environment, default to empty string
         # path_prefix = os.getenv("ACTIVE_DEV_PATH_PREFIX", "")
         # Substitute placeholder in template content
-        path_prefix = get_active_dev_path_prefix(project_path)
+        path_prefix = get_active_dev_path_prefix(project_path, override=path_prefix_override)
         processed_content = template_content.replace("{ACTIVE_DEV_PATH_PREFIX}", path_prefix)
         return processed_content
     except Exception as e:
@@ -367,7 +371,7 @@ def discover_custom_modes(project_path: Path) -> List[str]:
     return sorted(custom)
 
 
-def is_dev_like_mode(mode: str, project_path: Path) -> bool:
+def is_dev_like_mode(mode: str, project_path: Path, path_prefix_override: Optional[str] = None) -> bool:
     """Return True if *mode* uses local editable paths (i.e. contains path = entries).
 
     Built-in 'dev' mode is always dev-like.  For custom modes the template
@@ -376,7 +380,7 @@ def is_dev_like_mode(mode: str, project_path: Path) -> bool:
     """
     if mode == "dev":
         return True
-    content = read_template(project_path, mode)
+    content = read_template(project_path, mode, path_prefix_override=path_prefix_override)
     if content is None:
         return False
     return bool(extract_dev_paths(content))
@@ -636,12 +640,12 @@ def filter_sources_by_dependencies(sources: Dict[str, dict], dependencies: Set[s
     return filtered
 
 
-def render_template(template_name: str, include_deps: Set[str], project_path: Optional[Path] = None) -> str:
+def render_template(template_name: str, include_deps: Set[str], project_path: Optional[Path] = None, path_prefix_override: Optional[str] = None) -> str:
     """Render a Jinja2 template with the given dependencies to include."""
     env = get_jinja_env()
     template = env.get_template(template_name)
     # Get ACTIVE_DEV_PATH_PREFIX from environment, default to empty string
-    path_prefix = get_active_dev_path_prefix(project_path)
+    path_prefix = get_active_dev_path_prefix(project_path, override=path_prefix_override)
     return template.render(include_deps=include_deps, ACTIVE_DEV_PATH_PREFIX=path_prefix)
 
 
@@ -660,15 +664,15 @@ def generate_workspace_template(include_deps: Set[str], project_path: Optional[P
     return render_template("pyproject_template_workspace.toml_fragment.j2", include_deps, project_path)
 
 
-def generate_workspace_fragment_from_templates(project_path: Path) -> Optional[str]:
+def generate_workspace_fragment_from_templates(project_path: Path, path_prefix_override: Optional[str] = None) -> Optional[str]:
     """Generate a workspace fragment from existing dev and release fragments.
 
     For each dep that has a local path in the dev fragment, emits `dep = { workspace = true }`.
     All other entries (git-pinned tools/libs) are preserved unchanged from the release fragment.
     Returns the fragment string, or None if dev/release fragments are missing or empty.
     """
-    dev_content = read_template(project_path, "dev")
-    release_content = read_template(project_path, "release")
+    dev_content = read_template(project_path, "dev", path_prefix_override=path_prefix_override)
+    release_content = read_template(project_path, "release", path_prefix_override=path_prefix_override)
     if not dev_content or not release_content:
         return None
 
@@ -767,7 +771,7 @@ def deploy_templates(project_path: Path, dry_run: bool = False) -> bool:
         return False
 
 
-def ensure_workspace_fragment(repo_path: Path, dry_run: bool = False) -> Optional[str]:
+def ensure_workspace_fragment(repo_path: Path, dry_run: bool = False, path_prefix_override: Optional[str] = None) -> Optional[str]:
     """Ensure a workspace fragment exists for repo_path, generating it from dev+release if needed.
 
     Returns the fragment content string if available (either pre-existing or freshly generated),
@@ -775,9 +779,9 @@ def ensure_workspace_fragment(repo_path: Path, dry_run: bool = False) -> Optiona
     """
     workspace_file = repo_path / "templating" / "pyproject_template_workspace.toml_fragment"
     if workspace_file.exists():
-        return read_template(repo_path, "workspace")
+        return read_template(repo_path, "workspace", path_prefix_override=path_prefix_override)
 
-    content = generate_workspace_fragment_from_templates(repo_path)
+    content = generate_workspace_fragment_from_templates(repo_path, path_prefix_override=path_prefix_override)
     if content is None:
         return None
 
@@ -792,7 +796,7 @@ def ensure_workspace_fragment(repo_path: Path, dry_run: bool = False) -> Optiona
     return content
 
 
-def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: bool = False, no_clone: bool = False) -> int:
+def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: bool = False, no_clone: bool = False, path_prefix_override: Optional[str] = None) -> int:
     """Switch dependencies for a list of repos."""
     success_count = 0
     fail_count = 0
@@ -802,9 +806,9 @@ def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: 
         print(f"Processing {repo_name}...")
 
         if mode == "workspace":
-            template_content = ensure_workspace_fragment(repo_path, dry_run=dry_run)
+            template_content = ensure_workspace_fragment(repo_path, dry_run=dry_run, path_prefix_override=path_prefix_override)
         else:
-            template_content = read_template(repo_path, mode)
+            template_content = read_template(repo_path, mode, path_prefix_override=path_prefix_override)
 
         if template_content is None:
             print(f"  Error: Could not read template for {repo_name}", file=sys.stderr)
@@ -819,8 +823,8 @@ def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: 
 
         # For dev-like modes (built-in 'dev' or custom modes with local paths),
         # check for missing dependencies and offer to clone them.
-        if is_dev_like_mode(mode, repo_path):
-            release_template = read_template(repo_path, "release")
+        if is_dev_like_mode(mode, repo_path, path_prefix_override=path_prefix_override):
+            release_template = read_template(repo_path, "release", path_prefix_override=path_prefix_override)
             if release_template:
                 default_username = get_default_github_username()
                 check_and_clone_missing_deps(repo_path, template_content, release_template, dry_run=dry_run, auto_yes=auto_yes, no_clone=no_clone, default_github_username=default_username)
@@ -901,6 +905,7 @@ Examples:
   uv-deps-switcher workspace --all                  # Switch all repos to workspace mode
   uv-deps-switcher dev --all                        # Switch all detected repos
   uv-deps-switcher dev --repo PhoLogToLabStreamingLayer
+  uv-deps-switcher external --checkout-dest ./EXTERNAL
   uv-deps-switcher list-groups
   uv-deps-switcher list-modes                       # List built-in and custom modes
   uv-deps-switcher deploy-templates                 # Deploy templates to current project
@@ -952,6 +957,14 @@ Examples:
         "--no-clone",
         action="store_true",
         help="Skip prompts to clone missing dependencies (dev mode only)"
+    )
+    parser.add_argument(
+        "--checkout-dest",
+        metavar="PATH",
+        help=(
+            "Override ACTIVE_DEV_PATH_PREFIX for this run (e.g. ./EXTERNAL). "
+            "Sets the base directory for local dependency paths and clone targets."
+        )
     )
     
     args = parser.parse_args()
@@ -1073,7 +1086,14 @@ Examples:
     
     # Perform the switch
     print()
-    fail_count = switch_repos(repos_to_switch, args.mode, dry_run=args.dry_run, auto_yes=args.yes, no_clone=args.no_clone)
+    fail_count = switch_repos(
+        repos_to_switch,
+        args.mode,
+        dry_run=args.dry_run,
+        auto_yes=args.yes,
+        no_clone=args.no_clone,
+        path_prefix_override=args.checkout_dest,
+    )
     
     if fail_count > 0:
         return 1

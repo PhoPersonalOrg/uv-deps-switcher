@@ -91,6 +91,7 @@ Templates support the `ACTIVE_DEV_PATH_PREFIX` environment variable for machine-
 
 In template files, use the placeholder `{ACTIVE_DEV_PATH_PREFIX}` (for plain TOML templates) or `{{ ACTIVE_DEV_PATH_PREFIX }}` (for Jinja2 templates):
 
+```powershell
 $env:ACTIVE_DEV_PATH_PREFIX = "C:\Users\pho\repos\EmotivEpoc\ACTIVE_DEV"
 $env:ACTIVE_DEV_PATH_PREFIX = "./EXTERNAL"
 
@@ -153,7 +154,11 @@ uv-deps-switcher kdiba        # Apply custom 'kdiba' template
 uv-deps-switcher list-modes   # Show all built-in and custom modes for this project
 ```
 
-Custom modes work with all the same flags (`--group`, `--all`, `--repo`, `--dry-run`, etc.). If the custom template contains `path =` entries the tool will perform the same missing-dependency clone-check as `dev` mode.
+Custom modes work with all the same flags (`--group`, `--all`, `--repo`, `--dry-run`, etc.). If the custom template contains `path =` entries the tool will perform the same missing-dependency clone-check as `dev` mode. Use `--checkout-dest` to override `{ACTIVE_DEV_PATH_PREFIX}` for one run without setting an environment variable:
+
+```bash
+uv-deps-switcher external --checkout-dest "./EXTERNAL"
+```
 
 ### Deploy Templates to Current Project
 
@@ -168,9 +173,7 @@ uv-deps-switcher deploy-templates --dry-run
 ```
 
 ```bash
-$env:ACTIVE_DEV_PATH_PREFIX = "./EXTERNAL"
-uv-deps-switcher external
-
+uv-deps-switcher external --checkout-dest "./EXTERNAL"
 ```
 
 
@@ -221,6 +224,9 @@ uv-deps-switcher dev --group main --dry-run
 
 # Skip auto-clone prompts for missing dependencies
 uv-deps-switcher dev --no-clone
+
+# Override the local checkout base used by {ACTIVE_DEV_PATH_PREFIX}
+uv-deps-switcher external --checkout-dest ./EXTERNAL
 
 # List available groups
 uv-deps-switcher list-groups
