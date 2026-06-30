@@ -305,14 +305,19 @@ def find_active_dev_dir(start_path: Path) -> Optional[Path]:
     return None
 
 
-def get_active_dev_path_prefix(project_path: Optional[Path] = None, override: Optional[str] = None) -> str:
+def get_active_dev_path_prefix(
+    project_path: Optional[Path] = None,
+    override: Optional[str] = None,
+    auto_detect_absolute: bool = False,
+) -> str:
     """Resolve ACTIVE_DEV_PATH_PREFIX for template substitution.
 
     Priority:
     1. Explicit ``--checkout-dest`` override, when provided
     2. ``ACTIVE_DEV_PATH_PREFIX`` environment variable when explicitly set
        (including empty string — used for sibling-relative ``../`` templates)
-    3. Auto-detect the nearest ``ACTIVE_DEV`` ancestor of *project_path*
+    3. Auto-detect the nearest ``ACTIVE_DEV`` ancestor of *project_path* when
+       absolute-prefix mode is enabled
     4. Empty string
     """
     if override is not None:
@@ -321,7 +326,7 @@ def get_active_dev_path_prefix(project_path: Optional[Path] = None, override: Op
     if "ACTIVE_DEV_PATH_PREFIX" in os.environ:
         return os.environ["ACTIVE_DEV_PATH_PREFIX"]
 
-    if project_path is not None:
+    if auto_detect_absolute and project_path is not None:
         active_dev = find_active_dev_dir(project_path)
         if active_dev is not None:
             return active_dev.as_posix()
@@ -371,11 +376,11 @@ def read_template(project_path: Path, mode: str, path_prefix_override: Optional[
     try:
         template_content = template_file.read_text(encoding="utf-8")
 
-        # Process environment variable placeholders
-        # Get ACTIVE_DEV_PATH_PREFIX from environment, default to empty string
-        # path_prefix = os.getenv("ACTIVE_DEV_PATH_PREFIX", "")
-        # Substitute placeholder in template content
-        path_prefix = get_active_dev_path_prefix(project_path, override=path_prefix_override)
+        path_prefix = get_active_dev_path_prefix(
+            project_path,
+            override=path_prefix_override,
+            auto_detect_absolute=(mode == "external"),
+        )
         processed_content = template_content.replace("{ACTIVE_DEV_PATH_PREFIX}", path_prefix)
         return processed_content
     except Exception as e:

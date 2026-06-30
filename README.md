@@ -87,16 +87,16 @@ Templates support the `ACTIVE_DEV_PATH_PREFIX` environment variable for machine-
 
 - **Absolute paths** (e.g. `pyproject_template_external.toml_fragment` with `{ACTIVE_DEV_PATH_PREFIX}/PhoPyLSLhelper`):
   - Set `ACTIVE_DEV_PATH_PREFIX` to the full path of your `ACTIVE_DEV` directory, **or**
-  - Leave it unset when running inside an `ACTIVE_DEV` tree — the tool auto-detects the nearest `ACTIVE_DEV` ancestor.
+  - Leave it unset when running `external` mode inside an `ACTIVE_DEV` tree — the tool auto-detects the nearest `ACTIVE_DEV` ancestor.
 
-In template files, use the placeholder `{ACTIVE_DEV_PATH_PREFIX}` (for plain TOML templates) or `{{ ACTIVE_DEV_PATH_PREFIX }}` (for Jinja2 templates):
+In deployed template files, use the placeholder `{ACTIVE_DEV_PATH_PREFIX}` so it is resolved when switching modes. The `dev` template keeps this placeholder for sibling-relative paths and resolves it to an empty string by default; the `external` template resolves it to an absolute base when no explicit value is provided.
 
 ```powershell
 $env:ACTIVE_DEV_PATH_PREFIX = "C:\Users\pho\repos\EmotivEpoc\ACTIVE_DEV"
 $env:ACTIVE_DEV_PATH_PREFIX = "./EXTERNAL"
 
 uv-deps-switcher external --checkout-dest "./EXTERNAL"
-
+```
 
 ```toml
 phopylslhelper = { path = "../{ACTIVE_DEV_PATH_PREFIX}PhoPyLSLhelper", editable = true }
@@ -179,7 +179,7 @@ Generated fragments include:
 - `templating/pyproject_template_release.toml_fragment` - git URLs
 - `templating/pyproject_template_workspace.toml_fragment` - uv workspace sources
 
-The external fragment keeps `{ACTIVE_DEV_PATH_PREFIX}` in the deployed template so it can be changed when applying the mode:
+The dev and external fragments keep `{ACTIVE_DEV_PATH_PREFIX}` in the deployed template so it can be changed when applying the mode. In `dev` mode the unset default is empty for sibling paths; in `external` mode the unset default can auto-detect the nearest `ACTIVE_DEV` directory:
 
 ```toml
 phopylslhelper = { path = "{ACTIVE_DEV_PATH_PREFIX}/PhoPyLSLhelper", editable = true }
