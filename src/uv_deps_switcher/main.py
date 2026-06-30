@@ -933,16 +933,16 @@ def main():
             print("Custom modes: (none found in templating/ folder)")
         return 0
 
-    # Handle deploy-template aliases separately
-    deploy_template_subcommands = {"deploy-template", "deploy-templates", "generate-template", "generate-templates"}
+    # Handle deploy-templates command
+    deploy_template_subcommands = {"deploy-templates"}
     is_deploy_template_subcommand = len(sys.argv) > 1 and sys.argv[1] in deploy_template_subcommands
-    is_deploy_template_flag = len(sys.argv) > 1 and sys.argv[1] == "--deploy-template"
+    is_deploy_template_flag = len(sys.argv) > 1 and sys.argv[1] == "--deploy-templates"
     if is_deploy_template_subcommand or is_deploy_template_flag:
         if is_deploy_template_flag and len(sys.argv) > 2:
-            print("Error: --deploy-template does not accept additional arguments", file=sys.stderr)
+            print("Error: --deploy-templates does not accept additional arguments", file=sys.stderr)
             return 1
 
-        deploy_prog = "uv-deps-switcher --deploy-template" if is_deploy_template_flag else f"uv-deps-switcher {sys.argv[1]}"
+        deploy_prog = "uv-deps-switcher --deploy-templates" if is_deploy_template_flag else f"uv-deps-switcher {sys.argv[1]}"
         deploy_parser = argparse.ArgumentParser(prog=deploy_prog, description="Deploy template fragments to current project based on its dependencies")
         deploy_parser.add_argument("--dry-run", action="store_true", help="Show what would be created without making changes")
         deploy_parser.add_argument("-y", "--yes", "--force", action="store_true", dest="yes", help="Skip confirmation prompts (auto-confirm all actions)")
@@ -991,8 +991,7 @@ Examples:
   uv-deps-switcher list-groups
   uv-deps-switcher list-modes                       # List built-in and custom modes
   uv-deps-switcher deploy-templates                 # Deploy templates to current project
-  uv-deps-switcher generate-templates               # Alias for deploy-templates
-  uv-deps-switcher --deploy-template                # Deploy templates to current project
+  uv-deps-switcher --deploy-templates               # Deploy templates to current project
         """
     )
 
