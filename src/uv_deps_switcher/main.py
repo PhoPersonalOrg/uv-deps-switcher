@@ -249,7 +249,7 @@ def find_projects_with_templating(workspace_root: Path) -> List[Path]:
     return projects
 
 
-def read_template(project_path: Path, mode: str) -> Optional[str]:
+def read_template(project_path: Path, mode: str, checkout_dir: Optional[str] = None) -> Optional[str]:
     """Read template file for a project and process environment variable placeholders."""
     template_file = project_path / "templating" / f"pyproject_template_{mode}.toml_fragment"
     
@@ -263,6 +263,17 @@ def read_template(project_path: Path, mode: str) -> Optional[str]:
         path_prefix = os.getenv("ACTIVE_DEV_PATH_PREFIX", "")
         # Substitute placeholder in template content
         processed_content = template_content.replace("{ACTIVE_DEV_PATH_PREFIX}", path_prefix)
+
+        if checkout_dir:
+            import re
+            replace_str = checkout_dir if checkout_dir.endswith('/') else checkout_dir + '/'
+            new_content = re.sub(r'(path\s*=\s*["\'])\.\./', rf'\g<1>{replace_str}', processed_content)
+            if new_content != processed_content:
+                processed_content = new_content
+                # Create the folder if it doesn't exist
+                checkout_path = (project_path / checkout_dir).resolve()
+                checkout_path.mkdir(parents=True, exist_ok=True)
+
         return processed_content
     except Exception as e:
         print(f"Error reading template {template_file}: {e}", file=sys.stderr)
@@ -300,7 +311,7 @@ def discover_custom_modes(project_path: Path) -> List[str]:
     return sorted(custom)
 
 
-def is_dev_like_mode(mode: str, project_path: Path) -> bool:
+def is_dev_like_mode(mode: str, project_path: Path, checkout_dir: Optional[str] = None) -> bool:
     """Return True if *mode* uses local editable paths (i.e. contains path = entries).
 
     Built-in 'dev' mode is always dev-like.  For custom modes the template
@@ -309,7 +320,7 @@ def is_dev_like_mode(mode: str, project_path: Path) -> bool:
     """
     if mode == "dev":
         return True
-    content = read_template(project_path, mode)
+    content = read_template(project_path, mode, checkout_dir=checkout_dir)
     if content is None:
         return False
     return bool(extract_dev_paths(content))
@@ -725,7 +736,7 @@ def ensure_workspace_fragment(repo_path: Path, dry_run: bool = False) -> Optiona
     return content
 
 
-def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: bool = False, no_clone: bool = False) -> int:
+def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: bool = False, no_clone: bool = False, checkout_dir: Optional[str] = None) -> int:
     """Switch dependencies for a list of repos."""
     success_count = 0
     fail_count = 0
@@ -737,7 +748,7 @@ def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: 
         if mode == "workspace":
             template_content = ensure_workspace_fragment(repo_path, dry_run=dry_run)
         else:
-            template_content = read_template(repo_path, mode)
+            template_content = read_template(repo_path, mode, checkout_dir=checkout_dir)
 
         if template_content is None:
             print(f"  Error: Could not read template for {repo_name}", file=sys.stderr)
@@ -752,7 +763,7 @@ def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: 
 
         # For dev-like modes (built-in 'dev' or custom modes with local paths),
         # check for missing dependencies and offer to clone them.
-        if is_dev_like_mode(mode, repo_path):
+        if is_dev_like_mode(mode, repo_path, checkout_dir=checkout_dir):
             release_template = read_template(repo_path, "release")
             if release_template:
                 default_username = get_default_github_username()
@@ -886,6 +897,13 @@ Examples:
         action="store_true",
         help="Skip prompts to clone missing dependencies (dev mode only)"
     )
+    parser.add_argument(
+        "--checkout-dir",
+        nargs="?",
+        const="EXTERNAL/",
+        default=None,
+        help="Override checkout folder for dev mode to permit usage where checkouts above the directory fail. Replaces '../' with this path and creates the folder if it doesn't exist. Defaults to 'EXTERNAL/'."
+    )
     
     args = parser.parse_args()
 
@@ -1006,7 +1024,7 @@ Examples:
     
     # Perform the switch
     print()
-    fail_count = switch_repos(repos_to_switch, args.mode, dry_run=args.dry_run, auto_yes=args.yes, no_clone=args.no_clone)
+    fail_count = switch_repos(repos_to_switch, args.mode, dry_run=args.dry_run, auto_yes=args.yes, no_clone=args.no_clone, checkout_dir=getattr(args, 'checkout_dir', None))
     
     if fail_count > 0:
         return 1
