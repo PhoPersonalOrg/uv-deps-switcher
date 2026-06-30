@@ -85,7 +85,17 @@ Templates support the `ACTIVE_DEV_PATH_PREFIX` environment variable for machine-
   - Set `ACTIVE_DEV_PATH_PREFIX=ACTIVE_DEV/`
   - Paths will be: `../ACTIVE_DEV/PhoPyLSLhelper`, `../ACTIVE_DEV/PhoPyMNEHelper`, etc.
 
+- **Absolute paths** (e.g. `pyproject_template_external.toml_fragment` with `{ACTIVE_DEV_PATH_PREFIX}/PhoPyLSLhelper`):
+  - Set `ACTIVE_DEV_PATH_PREFIX` to the full path of your `ACTIVE_DEV` directory, **or**
+  - Leave it unset when running inside an `ACTIVE_DEV` tree — the tool auto-detects the nearest `ACTIVE_DEV` ancestor.
+
 In template files, use the placeholder `{ACTIVE_DEV_PATH_PREFIX}` (for plain TOML templates) or `{{ ACTIVE_DEV_PATH_PREFIX }}` (for Jinja2 templates):
+
+$env:ACTIVE_DEV_PATH_PREFIX = "C:\Users\pho\repos\EmotivEpoc\ACTIVE_DEV"
+$env:ACTIVE_DEV_PATH_PREFIX = "./EXTERNAL"
+
+uv-deps-switcher external --checkout-dest "./EXTERNAL"
+
 
 ```toml
 phopylslhelper = { path = "../{ACTIVE_DEV_PATH_PREFIX}PhoPyLSLhelper", editable = true }
@@ -156,6 +166,13 @@ uv-deps-switcher deploy-templates
 # Dry run to preview what would be created
 uv-deps-switcher deploy-templates --dry-run
 ```
+
+```bash
+$env:ACTIVE_DEV_PATH_PREFIX = "./EXTERNAL"
+uv-deps-switcher external
+
+```
+
 
 This command:
 1. Reads the current `[tool.uv.sources]` section from `pyproject.toml`
