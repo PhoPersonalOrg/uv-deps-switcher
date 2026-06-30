@@ -968,12 +968,6 @@ def main():
             print("Error: No pyproject.toml found in current directory", file=sys.stderr)
             return 1
         
-        if not deploy_args.dry_run and not deploy_args.yes:
-            response = input(f"Deploy templates to {cwd.name}? [y/N]: ")
-            if response.lower() not in ["y", "yes"]:
-                print("Cancelled")
-                return 0
-        
         if deploy_templates(cwd, dry_run=deploy_args.dry_run):
             if not deploy_args.dry_run:
                 print("\nSuccessfully deployed templates!")
