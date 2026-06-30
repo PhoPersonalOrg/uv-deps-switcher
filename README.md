@@ -166,7 +166,7 @@ This command:
 
 ### Auto-Clone Missing Dependencies
 
-When switching to dev mode, if any local dependency paths don't exist, the tool will offer to clone them from GitHub. Clone URLs come from the release template when present; for dependencies with no `git` URL in the release template, the tool builds a fallback URL (`https://github.com/<username>/<repo>.git`, where `<repo>` is the last path component of the dev path) using a username resolved from the following priority chain:
+When switching to dev mode, or any custom mode with local paths, if any local dependency paths don't exist, the tool will offer to clone them from GitHub. Clone URLs come from the release template when present, and release-template `rev` values are honored when cloning so branch, tag, and commit pins are checked out instead of the remote default branch. For dependencies with no `git` URL in the release template, the tool builds a fallback URL (`https://github.com/<username>/<repo>.git`, where `<repo>` is the last path component of the dev path) using a username resolved from the following priority chain:
 
 1. `default_github_username` in `.uv-deps-switcher.toml` (explicit override)
 2. The active repo's `git remote origin` URL (e.g. `https://github.com/CommanderPho/emotiv-lsl.git` → `CommanderPho`)
@@ -181,9 +181,9 @@ Processing my-project...
     - neuropy -> ../NeuroPy (not found)
   
   Clone 2 missing repo(s) from GitHub? [y/N]: y
-    Cloning https://github.com/CommanderPho/phopylslhelper.git...
+    Cloning https://github.com/CommanderPho/phopylslhelper.git at develop...
     Cloned to ../PhoPyLSLhelper
-    Cloning https://github.com/CommanderPho/NeuroPy.git...
+    Cloning https://github.com/CommanderPho/NeuroPy.git at feature/safe-advance...
     Cloned to ../NeuroPy
   Updated my-project to dev mode
 ```

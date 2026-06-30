@@ -61,31 +61,60 @@ def extract_dev_paths(template_content: str) -> Dict[str, str]:
     return paths
 
 
-def extract_git_urls(template_content: str) -> Dict[str, str]:
-    """Extract git URLs from release template. Returns {dep_name: git_url}."""
+def extract_git_sources(template_content: str) -> Dict[str, Tuple[str, Optional[str]]]:
+    """Extract git sources from release template. Returns {dep_name: (git_url, rev)}."""
     sources = parse_template_sources(template_content)
-    urls = {}
+    git_sources = {}
     for dep_name, config in sources.items():
         if isinstance(config, dict) and "git" in config:
-            urls[dep_name] = config["git"]
-    return urls
+            rev = config.get("rev")
+            git_sources[dep_name] = (config["git"], rev if isinstance(rev, str) else None)
+    return git_sources
+
+
+def resolve_dependency_path(project_path: Path, path_value: str) -> Path:
+    """Resolve a dependency path from a template (relative or absolute)."""
+    path = Path(path_value)
+    if path.is_absolute():
+        return path.resolve()
+    return (project_path / path_value).resolve()
 
 
 def find_missing_dependencies(project_path: Path, dev_paths: Dict[str, str]) -> List[Tuple[str, str]]:
     """Check which local dependency paths don't exist. Returns list of (dep_name, missing_path)."""
     missing = []
-    for dep_name, rel_path in dev_paths.items():
-        # Resolve the path relative to the project
-        abs_path = (project_path / rel_path).resolve()
+    for dep_name, path_value in dev_paths.items():
+        abs_path = resolve_dependency_path(project_path, path_value)
         if not abs_path.exists():
-            missing.append((dep_name, rel_path))
+            missing.append((dep_name, path_value))
     return missing
 
 
-def clone_dependency(git_url: str, target_path: Path, dry_run: bool = False) -> bool:
+def normalize_clone_rev(rev: str) -> str:
+    """Normalize uv-style revs into names accepted by git clone --branch."""
+    if rev.startswith("origin/"):
+        return rev[len("origin/"):]
+    return rev
+
+
+def is_commit_sha(rev: str) -> bool:
+    """Return True when *rev* looks like a git commit SHA."""
+    return bool(re.fullmatch(r"[0-9a-fA-F]{7,40}", rev))
+
+
+def clone_dependency(git_url: str, target_path: Path, rev: Optional[str] = None, dry_run: bool = False) -> bool:
     """Clone a git repository to the specified path."""
+    clone_rev = normalize_clone_rev(rev) if rev else None
+    checkout_after_clone = clone_rev if clone_rev and is_commit_sha(clone_rev) else None
+    clone_command = ["git", "clone", git_url, str(target_path)]
+    if clone_rev and checkout_after_clone is None:
+        clone_command = ["git", "clone", "--branch", clone_rev, git_url, str(target_path)]
+
     if dry_run:
-        print(f"    [DRY RUN] Would clone {git_url} to {target_path}")
+        rev_msg = f" at {clone_rev}" if clone_rev else ""
+        print(f"    [DRY RUN] Would clone {git_url}{rev_msg} to {target_path}")
+        if checkout_after_clone:
+            print(f"    [DRY RUN] Would checkout {checkout_after_clone} in {target_path}")
         return True
     
     if target_path.exists():
@@ -93,14 +122,19 @@ def clone_dependency(git_url: str, target_path: Path, dry_run: bool = False) -> 
         return True
     
     try:
-        print(f"    Cloning {git_url}...")
-        result = subprocess.run(["git", "clone", git_url, str(target_path)], capture_output=True, text=True, timeout=300)
-        if result.returncode == 0:
-            print(f"    Cloned to {target_path}")
-            return True
-        else:
+        rev_msg = f" at {clone_rev}" if clone_rev else ""
+        print(f"    Cloning {git_url}{rev_msg}...")
+        result = subprocess.run(clone_command, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
             print(f"    Error cloning: {result.stderr}", file=sys.stderr)
             return False
+        if checkout_after_clone:
+            checkout_result = subprocess.run(["git", "-C", str(target_path), "checkout", checkout_after_clone], capture_output=True, text=True, timeout=120)
+            if checkout_result.returncode != 0:
+                print(f"    Error checking out {checkout_after_clone}: {checkout_result.stderr}", file=sys.stderr)
+                return False
+        print(f"    Cloned to {target_path}")
+        return True
     except subprocess.TimeoutExpired:
         print(f"    Error: Clone timed out after 5 minutes", file=sys.stderr)
         return False
@@ -116,7 +150,7 @@ def check_and_clone_missing_deps(project_path: Path, dev_template: str, release_
     
     # Extract paths and URLs from templates
     dev_paths = extract_dev_paths(dev_template)
-    git_urls = extract_git_urls(release_template)
+    git_sources = extract_git_sources(release_template)
     
     effective_username = resolve_github_username(project_path, config_override=default_github_username)
     
@@ -130,15 +164,16 @@ def check_and_clone_missing_deps(project_path: Path, dev_template: str, release_
     print(f"  Missing local dependencies:")
     cloneable = []
     for dep_name, rel_path in missing:
-        abs_path = (project_path / rel_path).resolve()
-        if dep_name in git_urls:
+        abs_path = resolve_dependency_path(project_path, rel_path)
+        if dep_name in git_sources:
+            git_url, rev = git_sources[dep_name]
             print(f"    - {dep_name} -> {rel_path} (not found)")
-            cloneable.append((dep_name, rel_path, git_urls[dep_name]))
+            cloneable.append((dep_name, rel_path, git_url, rev))
         elif effective_username:
             repo_name = Path(rel_path).name
             fallback_url = f"https://github.com/{effective_username}/{repo_name}.git"
             print(f"    - {dep_name} -> {rel_path} (not found, inferred from origin)")
-            cloneable.append((dep_name, rel_path, fallback_url))
+            cloneable.append((dep_name, rel_path, fallback_url, None))
         else:
             print(f"    - {dep_name} -> {rel_path} (not found, no git URL available)")
     
@@ -155,9 +190,9 @@ def check_and_clone_missing_deps(project_path: Path, dev_template: str, release_
     
     # Clone each missing dependency
     all_success = True
-    for dep_name, rel_path, git_url in cloneable:
-        target_path = (project_path / rel_path).resolve()
-        if not clone_dependency(git_url, target_path, dry_run=dry_run):
+    for dep_name, rel_path, git_url, rev in cloneable:
+        target_path = resolve_dependency_path(project_path, rel_path)
+        if not clone_dependency(git_url, target_path, rev=rev, dry_run=dry_run):
             all_success = False
     
     return all_success
@@ -217,6 +252,36 @@ def find_workspace_root(start_path: Path) -> Optional[Path]:
     return None
 
 
+def find_active_dev_dir(start_path: Path) -> Optional[Path]:
+    """Walk up from *start_path* and return the nearest ancestor named ACTIVE_DEV."""
+    current = start_path.resolve()
+    while current != current.parent:
+        if current.name == "ACTIVE_DEV":
+            return current
+        current = current.parent
+    return None
+
+
+def get_active_dev_path_prefix(project_path: Optional[Path] = None) -> str:
+    """Resolve ACTIVE_DEV_PATH_PREFIX for template substitution.
+
+    Priority:
+    1. ``ACTIVE_DEV_PATH_PREFIX`` environment variable when explicitly set
+       (including empty string — used for sibling-relative ``../`` templates)
+    2. Auto-detect the nearest ``ACTIVE_DEV`` ancestor of *project_path*
+    3. Empty string
+    """
+    if "ACTIVE_DEV_PATH_PREFIX" in os.environ:
+        return os.environ["ACTIVE_DEV_PATH_PREFIX"]
+
+    if project_path is not None:
+        active_dev = find_active_dev_dir(project_path)
+        if active_dev is not None:
+            return active_dev.as_posix()
+
+    return ""
+
+
 def is_valid_project(project_path: Path) -> bool:
     """Check if a directory is a valid project with templating."""
     templating_dir = project_path / "templating"
@@ -258,10 +323,12 @@ def read_template(project_path: Path, mode: str) -> Optional[str]:
     
     try:
         template_content = template_file.read_text(encoding="utf-8")
+
         # Process environment variable placeholders
         # Get ACTIVE_DEV_PATH_PREFIX from environment, default to empty string
-        path_prefix = os.getenv("ACTIVE_DEV_PATH_PREFIX", "")
+        # path_prefix = os.getenv("ACTIVE_DEV_PATH_PREFIX", "")
         # Substitute placeholder in template content
+        path_prefix = get_active_dev_path_prefix(project_path)
         processed_content = template_content.replace("{ACTIVE_DEV_PATH_PREFIX}", path_prefix)
         return processed_content
     except Exception as e:
@@ -569,28 +636,28 @@ def filter_sources_by_dependencies(sources: Dict[str, dict], dependencies: Set[s
     return filtered
 
 
-def render_template(template_name: str, include_deps: Set[str]) -> str:
+def render_template(template_name: str, include_deps: Set[str], project_path: Optional[Path] = None) -> str:
     """Render a Jinja2 template with the given dependencies to include."""
     env = get_jinja_env()
     template = env.get_template(template_name)
     # Get ACTIVE_DEV_PATH_PREFIX from environment, default to empty string
-    path_prefix = os.getenv("ACTIVE_DEV_PATH_PREFIX", "")
+    path_prefix = get_active_dev_path_prefix(project_path)
     return template.render(include_deps=include_deps, ACTIVE_DEV_PATH_PREFIX=path_prefix)
 
 
-def generate_dev_template(include_deps: Set[str]) -> str:
+def generate_dev_template(include_deps: Set[str], project_path: Optional[Path] = None) -> str:
     """Generate dev template fragment using Jinja2 template."""
-    return render_template("pyproject_template_dev.toml_fragment.j2", include_deps)
+    return render_template("pyproject_template_dev.toml_fragment.j2", include_deps, project_path)
 
 
-def generate_release_template(include_deps: Set[str]) -> str:
+def generate_release_template(include_deps: Set[str], project_path: Optional[Path] = None) -> str:
     """Generate release template fragment using Jinja2 template."""
-    return render_template("pyproject_template_release.toml_fragment.j2", include_deps)
+    return render_template("pyproject_template_release.toml_fragment.j2", include_deps, project_path)
 
 
-def generate_workspace_template(include_deps: Set[str]) -> str:
+def generate_workspace_template(include_deps: Set[str], project_path: Optional[Path] = None) -> str:
     """Generate workspace template fragment using Jinja2 template."""
-    return render_template("pyproject_template_workspace.toml_fragment.j2", include_deps)
+    return render_template("pyproject_template_workspace.toml_fragment.j2", include_deps, project_path)
 
 
 def generate_workspace_fragment_from_templates(project_path: Path) -> Optional[str]:
@@ -657,9 +724,9 @@ def deploy_templates(project_path: Path, dry_run: bool = False) -> bool:
         include_deps = set(sources.keys()) if sources else dependencies
     
     # Generate templates using Jinja2
-    dev_template = generate_dev_template(include_deps)
-    release_template = generate_release_template(include_deps)
-    workspace_template = generate_workspace_template(include_deps)
+    dev_template = generate_dev_template(include_deps, project_path)
+    release_template = generate_release_template(include_deps, project_path)
+    workspace_template = generate_workspace_template(include_deps, project_path)
 
     # Show what will be created
     print(f"Deploying templates to {project_path.name}...")
