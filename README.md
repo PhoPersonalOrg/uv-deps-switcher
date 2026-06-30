@@ -77,19 +77,17 @@ The templates should contain the `[tool.uv.sources]` section that will replace t
 
 Templates support the `ACTIVE_DEV_PATH_PREFIX` environment variable for machine-specific path configurations:
 
-- **On machines where repos are siblings** (e.g., `ACTIVE_DEV/PhoOfflineEEGAnalysis`, `ACTIVE_DEV/PhoPyLSLhelper`):
-  - Leave `ACTIVE_DEV_PATH_PREFIX` unset or set to empty string
-  - Paths will be: `../PhoPyLSLhelper`, `../PhoPyMNEHelper`, etc.
+- **Dev template (sibling-relative paths)** — prefix is resolved when you run `deploy-templates`:
+  - Leave `ACTIVE_DEV_PATH_PREFIX` unset or set to empty string for sibling repos (e.g. `ACTIVE_DEV/PhoOfflineEEGAnalysis`, `ACTIVE_DEV/PhoPyLSLhelper`):
+    - Deployed paths: `../PhoPyLSLhelper`, `../PhoPyMNEHelper`, etc.
+  - Set `ACTIVE_DEV_PATH_PREFIX=ACTIVE_DEV/` when repos live under an `ACTIVE_DEV` subfolder:
+    - Deployed paths: `../ACTIVE_DEV/PhoPyLSLhelper`, `../ACTIVE_DEV/PhoPyMNEHelper`, etc.
+  - The deployed `pyproject_template_dev.toml_fragment` contains concrete relative paths (no placeholder).
 
-- **On machines where repos are in an ACTIVE_DEV subfolder**:
-  - Set `ACTIVE_DEV_PATH_PREFIX=ACTIVE_DEV/`
-  - Paths will be: `../ACTIVE_DEV/PhoPyLSLhelper`, `../ACTIVE_DEV/PhoPyMNEHelper`, etc.
-
-- **Absolute paths** (e.g. `pyproject_template_external.toml_fragment` with `{ACTIVE_DEV_PATH_PREFIX}/PhoPyLSLhelper`):
+- **External template (absolute paths)** — keeps the `{ACTIVE_DEV_PATH_PREFIX}` placeholder in the deployed fragment; it is resolved when switching to `external` mode:
   - Set `ACTIVE_DEV_PATH_PREFIX` to the full path of your `ACTIVE_DEV` directory, **or**
   - Leave it unset when running `external` mode inside an `ACTIVE_DEV` tree — the tool auto-detects the nearest `ACTIVE_DEV` ancestor.
-
-In deployed template files, use the placeholder `{ACTIVE_DEV_PATH_PREFIX}` so it is resolved when switching modes. The `dev` template keeps this placeholder for sibling-relative paths and resolves it to an empty string by default; the `external` template resolves it to an absolute base when no explicit value is provided.
+  - Use `--checkout-dest` to override for one run without setting an environment variable.
 
 ```powershell
 $env:ACTIVE_DEV_PATH_PREFIX = "C:\Users\pho\repos\EmotivEpoc\ACTIVE_DEV"
@@ -99,7 +97,11 @@ uv-deps-switcher external --checkout-dest "./EXTERNAL"
 ```
 
 ```toml
-phopylslhelper = { path = "../{ACTIVE_DEV_PATH_PREFIX}PhoPyLSLhelper", editable = true }
+# Deployed dev fragment (prefix baked in at deploy-templates time)
+phopylslhelper = { path = "../PhoPyLSLhelper", editable = true }
+
+# Deployed external fragment (placeholder resolved at mode-switch time)
+phopylslhelper = { path = "{ACTIVE_DEV_PATH_PREFIX}/PhoPyLSLhelper", editable = true }
 ```
 
 ## Usage
@@ -175,12 +177,12 @@ uv-deps-switcher deploy-templates --dry-run
 ```
 
 Generated fragments include:
-- `templating/pyproject_template_dev.toml_fragment` - local editable sibling paths
-- `templating/pyproject_template_external.toml_fragment` - local editable paths under `{ACTIVE_DEV_PATH_PREFIX}`
+- `templating/pyproject_template_dev.toml_fragment` - local editable sibling paths (prefix resolved at deploy time)
+- `templating/pyproject_template_external.toml_fragment` - local editable paths under `{ACTIVE_DEV_PATH_PREFIX}` (placeholder resolved at mode-switch time)
 - `templating/pyproject_template_release.toml_fragment` - git URLs
 - `templating/pyproject_template_workspace.toml_fragment` - uv workspace sources
 
-The dev and external fragments keep `{ACTIVE_DEV_PATH_PREFIX}` in the deployed template so it can be changed when applying the mode. In `dev` mode the unset default is empty for sibling paths; in `external` mode the unset default can auto-detect the nearest `ACTIVE_DEV` directory:
+The external fragment keeps `{ACTIVE_DEV_PATH_PREFIX}` in the deployed template so it can be resolved per machine when applying `external` mode. The dev fragment bakes in the prefix when you run `deploy-templates` (empty by default for sibling paths; set `ACTIVE_DEV_PATH_PREFIX=ACTIVE_DEV/` at deploy time if needed):
 
 ```toml
 phopylslhelper = { path = "{ACTIVE_DEV_PATH_PREFIX}/PhoPyLSLhelper", editable = true }

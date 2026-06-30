@@ -688,13 +688,21 @@ def filter_sources_by_dependencies(sources: Dict[str, dict], dependencies: Set[s
     return filtered
 
 
-def render_template(template_name: str, include_deps: Set[str], project_path: Optional[Path] = None, path_prefix_override: Optional[str] = None) -> str:
+def render_template(
+    template_name: str,
+    include_deps: Set[str],
+    project_path: Optional[Path] = None,
+    path_prefix_override: Optional[str] = None,
+    substitute_path_prefix: bool = True,
+) -> str:
     """Render a Jinja2 template with the given dependencies to include."""
     env = get_jinja_env()
     template = env.get_template(template_name)
-    # Get ACTIVE_DEV_PATH_PREFIX from environment, default to empty string
-    path_prefix = get_active_dev_path_prefix(project_path, override=path_prefix_override)
-    return template.render(include_deps=include_deps, ACTIVE_DEV_PATH_PREFIX=path_prefix)
+    render_kwargs: Dict[str, object] = {"include_deps": include_deps}
+    if substitute_path_prefix:
+        path_prefix = get_active_dev_path_prefix(project_path, override=path_prefix_override)
+        render_kwargs["ACTIVE_DEV_PATH_PREFIX"] = path_prefix
+    return template.render(**render_kwargs)
 
 
 def generate_dev_template(include_deps: Set[str], project_path: Optional[Path] = None) -> str:
@@ -704,7 +712,12 @@ def generate_dev_template(include_deps: Set[str], project_path: Optional[Path] =
 
 def generate_external_template(include_deps: Set[str], project_path: Optional[Path] = None) -> str:
     """Generate external template fragment using Jinja2 template."""
-    return render_template("pyproject_template_external.toml_fragment.j2", include_deps, project_path)
+    return render_template(
+        "pyproject_template_external.toml_fragment.j2",
+        include_deps,
+        project_path,
+        substitute_path_prefix=False,
+    )
 
 
 def generate_release_template(include_deps: Set[str], project_path: Optional[Path] = None) -> str:

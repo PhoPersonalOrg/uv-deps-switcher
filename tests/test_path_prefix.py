@@ -57,7 +57,7 @@ class PathPrefixTests(unittest.TestCase):
             self.assertIn('path = "../PhoPyLSLhelper"', content)
             self.assertNotIn("ACTIVE_DEV", content)
 
-    def test_render_dev_template_preserves_runtime_placeholder(self) -> None:
+    def test_render_dev_template_substitutes_prefix_at_build_time(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_path = Path(tmp) / "ACTIVE_DEV" / "ExampleProject"
             project_path.mkdir(parents=True)
@@ -68,7 +68,23 @@ class PathPrefixTests(unittest.TestCase):
                 project_path,
             )
 
-            self.assertIn('path = "../{ACTIVE_DEV_PATH_PREFIX}PhoPyLSLhelper"', content)
+            self.assertIn('path = "../PhoPyLSLhelper"', content)
+            self.assertNotIn("{ACTIVE_DEV_PATH_PREFIX}", content)
+            self.assertNotIn(project_path.parent.resolve().as_posix(), content)
+
+    def test_render_external_template_preserves_runtime_placeholder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_path = Path(tmp) / "ACTIVE_DEV" / "ExampleProject"
+            project_path.mkdir(parents=True)
+
+            content = render_template(
+                "pyproject_template_external.toml_fragment.j2",
+                {"phopylslhelper"},
+                project_path,
+                substitute_path_prefix=False,
+            )
+
+            self.assertIn('path = "{ACTIVE_DEV_PATH_PREFIX}/PhoPyLSLhelper"', content)
             self.assertNotIn(project_path.parent.resolve().as_posix(), content)
 
 
