@@ -102,7 +102,13 @@ def is_commit_sha(rev: str) -> bool:
     return bool(re.fullmatch(r"[0-9a-fA-F]{7,40}", rev))
 
 
-def clone_dependency(git_url: str, target_path: Path, rev: Optional[str] = None, dry_run: bool = False) -> bool:
+def clone_dependency(
+    git_url: str,
+    target_path: Path,
+    rev: Optional[str] = None,
+    dry_run: bool = False,
+    replace_existing: bool = False,
+) -> bool:
     """Clone a git repository to the specified path."""
     clone_rev = normalize_clone_rev(rev) if rev else None
     checkout_after_clone = clone_rev if clone_rev and is_commit_sha(clone_rev) else None
@@ -110,16 +116,31 @@ def clone_dependency(git_url: str, target_path: Path, rev: Optional[str] = None,
     if clone_rev and checkout_after_clone is None:
         clone_command = ["git", "clone", "--branch", clone_rev, git_url, str(target_path)]
 
+    target_exists = target_path.exists() or target_path.is_symlink()
+
     if dry_run:
         rev_msg = f" at {clone_rev}" if clone_rev else ""
+        if replace_existing and target_exists:
+            print(f"    [DRY RUN] Would remove {target_path}")
         print(f"    [DRY RUN] Would clone {git_url}{rev_msg} to {target_path}")
         if checkout_after_clone:
             print(f"    [DRY RUN] Would checkout {checkout_after_clone} in {target_path}")
         return True
     
-    if target_path.exists():
-        print(f"    Warning: {target_path} already exists, skipping clone", file=sys.stderr)
-        return True
+    if target_exists:
+        if replace_existing:
+            try:
+                print(f"    Removing existing checkout at {target_path}...")
+                if target_path.is_dir() and not target_path.is_symlink():
+                    shutil.rmtree(target_path)
+                else:
+                    target_path.unlink()
+            except Exception as e:
+                print(f"    Error removing {target_path}: {e}", file=sys.stderr)
+                return False
+        else:
+            print(f"    Warning: {target_path} already exists, skipping clone", file=sys.stderr)
+            return True
     
     try:
         rev_msg = f" at {clone_rev}" if clone_rev else ""
@@ -143,7 +164,16 @@ def clone_dependency(git_url: str, target_path: Path, rev: Optional[str] = None,
         return False
 
 
-def check_and_clone_missing_deps(project_path: Path, dev_template: str, release_template: str, dry_run: bool = False, auto_yes: bool = False, no_clone: bool = False, default_github_username: Optional[str] = None) -> bool:
+def check_and_clone_missing_deps(
+    project_path: Path,
+    dev_template: str,
+    release_template: str,
+    dry_run: bool = False,
+    auto_yes: bool = False,
+    no_clone: bool = False,
+    default_github_username: Optional[str] = None,
+    replace_repos: bool = False,
+) -> bool:
     """Check for missing dependencies and offer to clone them. Returns True if ready to proceed."""
     if no_clone:
         return True
@@ -154,45 +184,64 @@ def check_and_clone_missing_deps(project_path: Path, dev_template: str, release_
     
     effective_username = resolve_github_username(project_path, config_override=default_github_username)
     
-    # Find missing paths
-    missing = find_missing_dependencies(project_path, dev_paths)
+    # Find paths that need clone work.
+    deps_to_clone = list(dev_paths.items()) if replace_repos else find_missing_dependencies(project_path, dev_paths)
     
-    if not missing:
+    if not deps_to_clone:
         return True
     
-    # Show missing dependencies
-    print(f"  Missing local dependencies:")
+    # Show dependencies that will be cloned or replaced.
+    if replace_repos:
+        print("  Will replace local dependency checkout(s):")
+    else:
+        print("  Missing local dependencies:")
     cloneable = []
-    for dep_name, rel_path in missing:
+    for dep_name, rel_path in deps_to_clone:
         abs_path = resolve_dependency_path(project_path, rel_path)
+        path_status = "exists" if abs_path.exists() or abs_path.is_symlink() else "missing"
         if dep_name in git_sources:
             git_url, rev = git_sources[dep_name]
-            print(f"    - {dep_name} -> {rel_path} (not found)")
+            if replace_repos:
+                print(f"    - {dep_name} -> {rel_path} ({path_status})")
+            else:
+                print(f"    - {dep_name} -> {rel_path} (not found)")
             cloneable.append((dep_name, rel_path, git_url, rev))
         elif effective_username:
             repo_name = Path(rel_path).name
             fallback_url = f"https://github.com/{effective_username}/{repo_name}.git"
-            print(f"    - {dep_name} -> {rel_path} (not found, inferred from origin)")
+            if replace_repos:
+                print(f"    - {dep_name} -> {rel_path} ({path_status}, inferred from origin)")
+            else:
+                print(f"    - {dep_name} -> {rel_path} (not found, inferred from origin)")
             cloneable.append((dep_name, rel_path, fallback_url, None))
         else:
-            print(f"    - {dep_name} -> {rel_path} (not found, no git URL available)")
+            if replace_repos:
+                print(f"    - {dep_name} -> {rel_path} ({path_status}, no git URL available)")
+            else:
+                print(f"    - {dep_name} -> {rel_path} (not found, no git URL available)")
     
     if not cloneable:
-        print(f"  Warning: No git URLs available for missing dependencies", file=sys.stderr)
+        print("  Warning: No git URLs available for missing dependencies", file=sys.stderr)
         return True  # Continue anyway, uv will fail later if deps are missing
     
     # Ask user if they want to clone
     if not dry_run and not auto_yes:
-        response = input(f"\n  Clone {len(cloneable)} missing repo(s) from GitHub? [y/N]: ")
+        if replace_repos:
+            response = input(f"\n  Remove and re-clone {len(cloneable)} repo(s)? This deletes existing directories. [y/N]: ")
+        else:
+            response = input(f"\n  Clone {len(cloneable)} missing repo(s) from GitHub? [y/N]: ")
         if response.lower() not in ["y", "yes"]:
-            print("  Skipping clone, continuing with switch...")
+            if replace_repos:
+                print("  Skipping replacement, continuing with switch...")
+            else:
+                print("  Skipping clone, continuing with switch...")
             return True
     
     # Clone each missing dependency
     all_success = True
     for dep_name, rel_path, git_url, rev in cloneable:
         target_path = resolve_dependency_path(project_path, rel_path)
-        if not clone_dependency(git_url, target_path, rev=rev, dry_run=dry_run):
+        if not clone_dependency(git_url, target_path, rev=rev, dry_run=dry_run, replace_existing=replace_repos):
             all_success = False
     
     return all_success
@@ -654,6 +703,11 @@ def generate_dev_template(include_deps: Set[str], project_path: Optional[Path] =
     return render_template("pyproject_template_dev.toml_fragment.j2", include_deps, project_path)
 
 
+def generate_external_template(include_deps: Set[str], project_path: Optional[Path] = None) -> str:
+    """Generate external template fragment using Jinja2 template."""
+    return render_template("pyproject_template_external.toml_fragment.j2", include_deps, project_path)
+
+
 def generate_release_template(include_deps: Set[str], project_path: Optional[Path] = None) -> str:
     """Generate release template fragment using Jinja2 template."""
     return render_template("pyproject_template_release.toml_fragment.j2", include_deps, project_path)
@@ -729,6 +783,7 @@ def deploy_templates(project_path: Path, dry_run: bool = False) -> bool:
     
     # Generate templates using Jinja2
     dev_template = generate_dev_template(include_deps, project_path)
+    external_template = generate_external_template(include_deps, project_path)
     release_template = generate_release_template(include_deps, project_path)
     workspace_template = generate_workspace_template(include_deps, project_path)
 
@@ -739,10 +794,13 @@ def deploy_templates(project_path: Path, dry_run: bool = False) -> bool:
     if dry_run:
         print("\n[DRY RUN] Would create:")
         print(f"  templating/pyproject_template_dev.toml_fragment")
+        print(f"  templating/pyproject_template_external.toml_fragment")
         print(f"  templating/pyproject_template_release.toml_fragment")
         print(f"  templating/pyproject_template_workspace.toml_fragment")
         print("\nDev template content:")
         print(dev_template)
+        print("External template content:")
+        print(external_template)
         print("Release template content:")
         print(release_template)
         print("Workspace template content:")
@@ -755,14 +813,17 @@ def deploy_templates(project_path: Path, dry_run: bool = False) -> bool:
 
     # Write templates
     dev_path = templating_dir / "pyproject_template_dev.toml_fragment"
+    external_path = templating_dir / "pyproject_template_external.toml_fragment"
     release_path = templating_dir / "pyproject_template_release.toml_fragment"
     workspace_path = templating_dir / "pyproject_template_workspace.toml_fragment"
 
     try:
         dev_path.write_text(dev_template, encoding="utf-8")
+        external_path.write_text(external_template, encoding="utf-8")
         release_path.write_text(release_template, encoding="utf-8")
         workspace_path.write_text(workspace_template, encoding="utf-8")
         print(f"  Created {dev_path}")
+        print(f"  Created {external_path}")
         print(f"  Created {release_path}")
         print(f"  Created {workspace_path}")
         return True
@@ -796,7 +857,15 @@ def ensure_workspace_fragment(repo_path: Path, dry_run: bool = False, path_prefi
     return content
 
 
-def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: bool = False, no_clone: bool = False, path_prefix_override: Optional[str] = None) -> int:
+def switch_repos(
+    repos: List[Path],
+    mode: str,
+    dry_run: bool = False,
+    auto_yes: bool = False,
+    no_clone: bool = False,
+    path_prefix_override: Optional[str] = None,
+    replace_repos: bool = False,
+) -> int:
     """Switch dependencies for a list of repos."""
     success_count = 0
     fail_count = 0
@@ -827,7 +896,20 @@ def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: 
             release_template = read_template(repo_path, "release", path_prefix_override=path_prefix_override)
             if release_template:
                 default_username = get_default_github_username()
-                check_and_clone_missing_deps(repo_path, template_content, release_template, dry_run=dry_run, auto_yes=auto_yes, no_clone=no_clone, default_github_username=default_username)
+                deps_ready = check_and_clone_missing_deps(
+                    repo_path,
+                    template_content,
+                    release_template,
+                    dry_run=dry_run,
+                    auto_yes=auto_yes,
+                    no_clone=no_clone,
+                    default_github_username=default_username,
+                    replace_repos=replace_repos,
+                )
+                if not deps_ready:
+                    print(f"  Error: Failed to clone dependencies for {repo_name}", file=sys.stderr)
+                    fail_count += 1
+                    continue
 
         if update_pyproject_sources(pyproject_path, template_content, dry_run=dry_run):
             if not dry_run:
@@ -860,12 +942,20 @@ def main():
             print("Custom modes: (none found in templating/ folder)")
         return 0
 
-    # Handle deploy-templates command separately
-    if len(sys.argv) > 1 and sys.argv[1] == "deploy-templates":
-        deploy_parser = argparse.ArgumentParser(prog="uv-deps-switcher deploy-templates", description="Deploy template fragments to current project based on its dependencies")
+    # Handle deploy-template aliases separately
+    deploy_template_subcommands = {"deploy-template", "deploy-templates"}
+    is_deploy_template_subcommand = len(sys.argv) > 1 and sys.argv[1] in deploy_template_subcommands
+    is_deploy_template_flag = len(sys.argv) > 1 and sys.argv[1] == "--deploy-template"
+    if is_deploy_template_subcommand or is_deploy_template_flag:
+        if is_deploy_template_flag and len(sys.argv) > 2:
+            print("Error: --deploy-template does not accept additional arguments", file=sys.stderr)
+            return 1
+
+        deploy_prog = "uv-deps-switcher --deploy-template" if is_deploy_template_flag else f"uv-deps-switcher {sys.argv[1]}"
+        deploy_parser = argparse.ArgumentParser(prog=deploy_prog, description="Deploy template fragments to current project based on its dependencies")
         deploy_parser.add_argument("--dry-run", action="store_true", help="Show what would be created without making changes")
         deploy_parser.add_argument("-y", "--yes", "--force", action="store_true", dest="yes", help="Skip confirmation prompts (auto-confirm all actions)")
-        deploy_args = deploy_parser.parse_args(sys.argv[2:])
+        deploy_args = deploy_parser.parse_args([] if is_deploy_template_flag else sys.argv[2:])
         
         cwd = Path.cwd()
         pyproject_path = cwd / "pyproject.toml"
@@ -906,9 +996,11 @@ Examples:
   uv-deps-switcher dev --all                        # Switch all detected repos
   uv-deps-switcher dev --repo PhoLogToLabStreamingLayer
   uv-deps-switcher external --checkout-dest ./EXTERNAL
+  uv-deps-switcher external --checkout-dest ./EXTERNAL --replace-repos
   uv-deps-switcher list-groups
   uv-deps-switcher list-modes                       # List built-in and custom modes
   uv-deps-switcher deploy-templates                 # Deploy templates to current project
+  uv-deps-switcher --deploy-template                # Deploy templates to current project
         """
     )
 
@@ -959,6 +1051,14 @@ Examples:
         help="Skip prompts to clone missing dependencies (dev mode only)"
     )
     parser.add_argument(
+        "--replace-repos",
+        action="store_true",
+        help=(
+            "Remove and re-clone local dependency checkouts listed in the mode template "
+            "(dev-like modes only). Uses git URLs from the release template."
+        )
+    )
+    parser.add_argument(
         "--checkout-dest",
         metavar="PATH",
         help=(
@@ -968,6 +1068,10 @@ Examples:
     )
     
     args = parser.parse_args()
+
+    if args.replace_repos and args.no_clone:
+        print("Error: --replace-repos cannot be used with --no-clone", file=sys.stderr)
+        return 1
 
     # Validate mode: must be a built-in or a custom mode discoverable from each
     # project.  We do a pre-flight check against cwd and the known built-ins;
@@ -1093,6 +1197,7 @@ Examples:
         auto_yes=args.yes,
         no_clone=args.no_clone,
         path_prefix_override=args.checkout_dest,
+        replace_repos=args.replace_repos,
     )
     
     if fail_count > 0:

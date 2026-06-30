@@ -167,9 +167,22 @@ Generate template fragments for the current project based on its existing `[tool
 ```bash
 cd /path/to/my-project
 uv-deps-switcher deploy-templates
+uv-deps-switcher --deploy-template
 
 # Dry run to preview what would be created
 uv-deps-switcher deploy-templates --dry-run
+```
+
+Generated fragments include:
+- `templating/pyproject_template_dev.toml_fragment` - local editable sibling paths
+- `templating/pyproject_template_external.toml_fragment` - local editable paths under `{ACTIVE_DEV_PATH_PREFIX}`
+- `templating/pyproject_template_release.toml_fragment` - git URLs
+- `templating/pyproject_template_workspace.toml_fragment` - uv workspace sources
+
+The external fragment keeps `{ACTIVE_DEV_PATH_PREFIX}` in the deployed template so it can be changed when applying the mode:
+
+```toml
+phopylslhelper = { path = "{ACTIVE_DEV_PATH_PREFIX}/PhoPyLSLhelper", editable = true }
 ```
 
 ```bash
@@ -180,9 +193,11 @@ uv-deps-switcher external --checkout-dest "./EXTERNAL"
 This command:
 1. Reads the current `[tool.uv.sources]` section from `pyproject.toml`
 2. Filters sources to only include dependencies listed in `[project.dependencies]`
-3. Generates dev templates (with local editable paths)
-4. Generates release templates (with git URLs inferred from local repos)
-5. Writes both templates to the `templating/` directory
+3. Generates dev templates (with local editable sibling paths)
+4. Generates external templates (with `{ACTIVE_DEV_PATH_PREFIX}` paths)
+5. Generates release templates (with git URLs inferred from local repos)
+6. Generates workspace templates (with uv workspace sources)
+7. Writes the generated templates to the `templating/` directory
 
 ### Auto-Clone Missing Dependencies
 
@@ -210,6 +225,16 @@ Processing my-project...
 
 Use `--no-clone` to skip this prompt and handle missing dependencies manually.
 
+Use `--replace-repos` with dev-like modes to remove and re-clone every local dependency checkout listed in the selected mode template, including paths that already exist. This is useful for a clean external checkout, for example:
+
+```bash
+uv-deps-switcher external --checkout-dest ./EXTERNAL --replace-repos
+uv-deps-switcher external --checkout-dest ./EXTERNAL --replace-repos --yes
+uv-deps-switcher external --checkout-dest ./EXTERNAL --replace-repos --dry-run
+```
+
+`-y`, `--yes`, and `--force` only skip confirmation prompts; destructive re-clone behavior requires `--replace-repos`.
+
 ### Additional Options
 
 ```bash
@@ -224,6 +249,9 @@ uv-deps-switcher dev --group main --dry-run
 
 # Skip auto-clone prompts for missing dependencies
 uv-deps-switcher dev --no-clone
+
+# Remove and re-clone local dependency checkouts for dev-like modes
+uv-deps-switcher external --checkout-dest ./EXTERNAL --replace-repos
 
 # Override the local checkout base used by {ACTIVE_DEV_PATH_PREFIX}
 uv-deps-switcher external --checkout-dest ./EXTERNAL
