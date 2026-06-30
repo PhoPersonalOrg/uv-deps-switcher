@@ -167,6 +167,7 @@ Generate template fragments for the current project based on its existing `[tool
 ```bash
 cd /path/to/my-project
 uv-deps-switcher deploy-templates
+uv-deps-switcher generate-templates
 uv-deps-switcher --deploy-template
 
 # Dry run to preview what would be created

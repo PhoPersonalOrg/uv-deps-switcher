@@ -934,7 +934,7 @@ def main():
         return 0
 
     # Handle deploy-template aliases separately
-    deploy_template_subcommands = {"deploy-template", "deploy-templates"}
+    deploy_template_subcommands = {"deploy-template", "deploy-templates", "generate-template", "generate-templates"}
     is_deploy_template_subcommand = len(sys.argv) > 1 and sys.argv[1] in deploy_template_subcommands
     is_deploy_template_flag = len(sys.argv) > 1 and sys.argv[1] == "--deploy-template"
     if is_deploy_template_subcommand or is_deploy_template_flag:
@@ -991,6 +991,7 @@ Examples:
   uv-deps-switcher list-groups
   uv-deps-switcher list-modes                       # List built-in and custom modes
   uv-deps-switcher deploy-templates                 # Deploy templates to current project
+  uv-deps-switcher generate-templates               # Alias for deploy-templates
   uv-deps-switcher --deploy-template                # Deploy templates to current project
         """
     )
