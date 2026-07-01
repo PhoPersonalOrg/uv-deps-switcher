@@ -851,7 +851,7 @@ def ensure_workspace_fragment(repo_path: Path, dry_run: bool = False, path_prefi
     return content
 
 
-def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: bool = False, no_clone: bool = False, path_prefix_override: Optional[str] = None, replace_repos: bool = False) -> int:
+def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: bool = False, no_clone: bool = False, path_prefix_override: Optional[str] = None, replace_repos: bool = False, cleanup_external: bool = False) -> int:
     """Switch dependencies for a list of repos."""
     success_count = 0
     fail_count = 0
@@ -900,6 +900,21 @@ def switch_repos(repos: List[Path], mode: str, dry_run: bool = False, auto_yes: 
         if update_pyproject_sources(pyproject_path, template_content, dry_run=dry_run):
             if not dry_run:
                 print(f"  Updated {repo_name} to {mode} mode")
+
+            if cleanup_external and mode != "external":
+                external_template = read_template(repo_path, "external", path_prefix_override=path_prefix_override)
+                if external_template:
+                    dev_paths = extract_dev_paths(external_template)
+                    for dep_name, rel_path in dev_paths.items():
+                        abs_path = resolve_dependency_path(repo_path, rel_path)
+                        if abs_path.exists() and abs_path.is_dir():
+                            if dry_run:
+                                print(f"  [DRY RUN] Would remove {abs_path}")
+                            else:
+                                import shutil
+                                shutil.rmtree(abs_path)
+                                print(f"  Removed {abs_path}")
+
             success_count += 1
         else:
             print(f"  Error: Failed to update {repo_name}", file=sys.stderr)
@@ -1045,6 +1060,11 @@ Examples:
         )
     )
     parser.add_argument(
+        "--cleanup-external",
+        action="store_true",
+        help="Remove external checkouts when switching away from external mode"
+    )
+    parser.add_argument(
         "--checkout-dest",
         metavar="PATH",
         help=(
@@ -1184,6 +1204,7 @@ Examples:
         no_clone=args.no_clone,
         path_prefix_override=args.checkout_dest,
         replace_repos=args.replace_repos,
+        cleanup_external=args.cleanup_external,
     )
     
     if fail_count > 0:
