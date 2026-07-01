@@ -305,14 +305,19 @@ def find_active_dev_dir(start_path: Path) -> Optional[Path]:
     return None
 
 
-def get_active_dev_path_prefix(project_path: Optional[Path] = None, override: Optional[str] = None) -> str:
+def get_active_dev_path_prefix(
+    project_path: Optional[Path] = None,
+    override: Optional[str] = None,
+    auto_detect_absolute: bool = False,
+) -> str:
     """Resolve ACTIVE_DEV_PATH_PREFIX for template substitution.
 
     Priority:
     1. Explicit ``--checkout-dest`` override, when provided
     2. ``ACTIVE_DEV_PATH_PREFIX`` environment variable when explicitly set
        (including empty string — used for sibling-relative ``../`` templates)
-    3. Auto-detect the nearest ``ACTIVE_DEV`` ancestor of *project_path*
+    3. Auto-detect the nearest ``ACTIVE_DEV`` ancestor of *project_path* when
+       absolute-prefix mode is enabled
     4. Empty string
     """
     if override is not None:
@@ -321,7 +326,7 @@ def get_active_dev_path_prefix(project_path: Optional[Path] = None, override: Op
     if "ACTIVE_DEV_PATH_PREFIX" in os.environ:
         return os.environ["ACTIVE_DEV_PATH_PREFIX"]
 
-    if project_path is not None:
+    if auto_detect_absolute and project_path is not None:
         active_dev = find_active_dev_dir(project_path)
         if active_dev is not None:
             return active_dev.as_posix()
@@ -371,11 +376,11 @@ def read_template(project_path: Path, mode: str, path_prefix_override: Optional[
     try:
         template_content = template_file.read_text(encoding="utf-8")
 
-        # Process environment variable placeholders
-        # Get ACTIVE_DEV_PATH_PREFIX from environment, default to empty string
-        # path_prefix = os.getenv("ACTIVE_DEV_PATH_PREFIX", "")
-        # Substitute placeholder in template content
-        path_prefix = get_active_dev_path_prefix(project_path, override=path_prefix_override)
+        path_prefix = get_active_dev_path_prefix(
+            project_path,
+            override=path_prefix_override,
+            auto_detect_absolute=(mode == "external"),
+        )
         processed_content = template_content.replace("{ACTIVE_DEV_PATH_PREFIX}", path_prefix)
         return processed_content
     except Exception as e:
@@ -683,13 +688,21 @@ def filter_sources_by_dependencies(sources: Dict[str, dict], dependencies: Set[s
     return filtered
 
 
-def render_template(template_name: str, include_deps: Set[str], project_path: Optional[Path] = None, path_prefix_override: Optional[str] = None) -> str:
+def render_template(
+    template_name: str,
+    include_deps: Set[str],
+    project_path: Optional[Path] = None,
+    path_prefix_override: Optional[str] = None,
+    substitute_path_prefix: bool = True,
+) -> str:
     """Render a Jinja2 template with the given dependencies to include."""
     env = get_jinja_env()
     template = env.get_template(template_name)
-    # Get ACTIVE_DEV_PATH_PREFIX from environment, default to empty string
-    path_prefix = get_active_dev_path_prefix(project_path, override=path_prefix_override)
-    return template.render(include_deps=include_deps, ACTIVE_DEV_PATH_PREFIX=path_prefix)
+    render_kwargs: Dict[str, object] = {"include_deps": include_deps}
+    if substitute_path_prefix:
+        path_prefix = get_active_dev_path_prefix(project_path, override=path_prefix_override)
+        render_kwargs["ACTIVE_DEV_PATH_PREFIX"] = path_prefix
+    return template.render(**render_kwargs)
 
 
 def generate_dev_template(include_deps: Set[str], project_path: Optional[Path] = None) -> str:
@@ -699,7 +712,12 @@ def generate_dev_template(include_deps: Set[str], project_path: Optional[Path] =
 
 def generate_external_template(include_deps: Set[str], project_path: Optional[Path] = None) -> str:
     """Generate external template fragment using Jinja2 template."""
-    return render_template("pyproject_template_external.toml_fragment.j2", include_deps, project_path)
+    return render_template(
+        "pyproject_template_external.toml_fragment.j2",
+        include_deps,
+        project_path,
+        substitute_path_prefix=False,
+    )
 
 
 def generate_release_template(include_deps: Set[str], project_path: Optional[Path] = None) -> str:
@@ -943,16 +961,16 @@ def main():
             print("Custom modes: (none found in templating/ folder)")
         return 0
 
-    # Handle deploy-template aliases separately
-    deploy_template_subcommands = {"deploy-template", "deploy-templates"}
+    # Handle deploy-templates command
+    deploy_template_subcommands = {"deploy-templates"}
     is_deploy_template_subcommand = len(sys.argv) > 1 and sys.argv[1] in deploy_template_subcommands
-    is_deploy_template_flag = len(sys.argv) > 1 and sys.argv[1] == "--deploy-template"
+    is_deploy_template_flag = len(sys.argv) > 1 and sys.argv[1] == "--deploy-templates"
     if is_deploy_template_subcommand or is_deploy_template_flag:
         if is_deploy_template_flag and len(sys.argv) > 2:
-            print("Error: --deploy-template does not accept additional arguments", file=sys.stderr)
+            print("Error: --deploy-templates does not accept additional arguments", file=sys.stderr)
             return 1
 
-        deploy_prog = "uv-deps-switcher --deploy-template" if is_deploy_template_flag else f"uv-deps-switcher {sys.argv[1]}"
+        deploy_prog = "uv-deps-switcher --deploy-templates" if is_deploy_template_flag else f"uv-deps-switcher {sys.argv[1]}"
         deploy_parser = argparse.ArgumentParser(prog=deploy_prog, description="Deploy template fragments to current project based on its dependencies")
         deploy_parser.add_argument("--dry-run", action="store_true", help="Show what would be created without making changes")
         deploy_parser.add_argument("-y", "--yes", "--force", action="store_true", dest="yes", help="Skip confirmation prompts (auto-confirm all actions)")
@@ -964,12 +982,6 @@ def main():
         if not pyproject_path.exists():
             print("Error: No pyproject.toml found in current directory", file=sys.stderr)
             return 1
-        
-        if not deploy_args.dry_run and not deploy_args.yes:
-            response = input(f"Deploy templates to {cwd.name}? [y/N]: ")
-            if response.lower() not in ["y", "yes"]:
-                print("Cancelled")
-                return 0
         
         if deploy_templates(cwd, dry_run=deploy_args.dry_run):
             if not deploy_args.dry_run:
@@ -1001,7 +1013,7 @@ Examples:
   uv-deps-switcher list-groups
   uv-deps-switcher list-modes                       # List built-in and custom modes
   uv-deps-switcher deploy-templates                 # Deploy templates to current project
-  uv-deps-switcher --deploy-template                # Deploy templates to current project
+  uv-deps-switcher --deploy-templates               # Deploy templates to current project
         """
     )
 

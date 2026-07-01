@@ -23,3 +23,6 @@ neuropy = { path = "../{{ ACTIVE_DEV_PATH_PREFIX }}NeuroPy", editable = true }
 {%- if 'pyphocorehelpers' in include_deps %}
 pyphocorehelpers = { path = "../{{ ACTIVE_DEV_PATH_PREFIX }}pyPhoCoreHelpers", editable = true }
 {%- endif %}
+{%- if 'dose-analysis-python' in include_deps %}
+dose-analysis-python = { path = "../{{ ACTIVE_DEV_PATH_PREFIX }}Dose-Analysis-Python", editable = true }
+{%- endif %}
