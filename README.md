@@ -7,6 +7,7 @@ A Python package that automatically switches UV dependency sources between dev (
 Install globally to make the command available system-wide:
 
 ```bash
+uv tool install https://github.com/CommanderPho/uv-deps-switcher.git
 cd uv-deps-switcher
 uv tool install .
 ```
@@ -77,31 +78,18 @@ The templates should contain the `[tool.uv.sources]` section that will replace t
 
 Templates support the `ACTIVE_DEV_PATH_PREFIX` environment variable for machine-specific path configurations:
 
-- **Dev template (sibling-relative paths)** — prefix is resolved when you run `deploy-templates`:
-  - Leave `ACTIVE_DEV_PATH_PREFIX` unset or set to empty string for sibling repos (e.g. `ACTIVE_DEV/PhoOfflineEEGAnalysis`, `ACTIVE_DEV/PhoPyLSLhelper`):
-    - Deployed paths: `../PhoPyLSLhelper`, `../PhoPyMNEHelper`, etc.
-  - Set `ACTIVE_DEV_PATH_PREFIX=ACTIVE_DEV/` when repos live under an `ACTIVE_DEV` subfolder:
-    - Deployed paths: `../ACTIVE_DEV/PhoPyLSLhelper`, `../ACTIVE_DEV/PhoPyMNEHelper`, etc.
-  - The deployed `pyproject_template_dev.toml_fragment` contains concrete relative paths (no placeholder).
+- **On machines where repos are siblings** (e.g., `ACTIVE_DEV/PhoOfflineEEGAnalysis`, `ACTIVE_DEV/PhoPyLSLhelper`):
+  - Leave `ACTIVE_DEV_PATH_PREFIX` unset or set to empty string
+  - Paths will be: `../PhoPyLSLhelper`, `../PhoPyMNEHelper`, etc.
 
-- **External template (absolute paths)** — keeps the `{ACTIVE_DEV_PATH_PREFIX}` placeholder in the deployed fragment; it is resolved when switching to `external` mode:
-  - Set `ACTIVE_DEV_PATH_PREFIX` to the full path of your `ACTIVE_DEV` directory, **or**
-  - Leave it unset when running `external` mode inside an `ACTIVE_DEV` tree — the tool auto-detects the nearest `ACTIVE_DEV` ancestor.
-  - Use `--checkout-dest` to override for one run without setting an environment variable.
+- **On machines where repos are in an ACTIVE_DEV subfolder**:
+  - Set `ACTIVE_DEV_PATH_PREFIX=ACTIVE_DEV/`
+  - Paths will be: `../ACTIVE_DEV/PhoPyLSLhelper`, `../ACTIVE_DEV/PhoPyMNEHelper`, etc.
 
-```powershell
-$env:ACTIVE_DEV_PATH_PREFIX = "C:\Users\pho\repos\EmotivEpoc\ACTIVE_DEV"
-$env:ACTIVE_DEV_PATH_PREFIX = "./EXTERNAL"
-
-uv-deps-switcher external --checkout-dest "./EXTERNAL"
-```
+In template files, use the placeholder `{ACTIVE_DEV_PATH_PREFIX}` (for plain TOML templates) or `{{ ACTIVE_DEV_PATH_PREFIX }}` (for Jinja2 templates):
 
 ```toml
-# Deployed dev fragment (prefix baked in at deploy-templates time)
-phopylslhelper = { path = "../PhoPyLSLhelper", editable = true }
-
-# Deployed external fragment (placeholder resolved at mode-switch time)
-phopylslhelper = { path = "{ACTIVE_DEV_PATH_PREFIX}/PhoPyLSLhelper", editable = true }
+phopylslhelper = { path = "../{ACTIVE_DEV_PATH_PREFIX}PhoPyLSLhelper", editable = true }
 ```
 
 ## Usage
@@ -156,11 +144,7 @@ uv-deps-switcher kdiba        # Apply custom 'kdiba' template
 uv-deps-switcher list-modes   # Show all built-in and custom modes for this project
 ```
 
-Custom modes work with all the same flags (`--group`, `--all`, `--repo`, `--dry-run`, etc.). If the custom template contains `path =` entries the tool will perform the same missing-dependency clone-check as `dev` mode. Use `--checkout-dest` to override `{ACTIVE_DEV_PATH_PREFIX}` for one run without setting an environment variable:
-
-```bash
-uv-deps-switcher external --checkout-dest "./EXTERNAL"
-```
+Custom modes work with all the same flags (`--group`, `--all`, `--repo`, `--dry-run`, etc.). If the custom template contains `path =` entries the tool will perform the same missing-dependency clone-check as `dev` mode.
 
 ### Deploy Templates to Current Project
 
@@ -169,42 +153,21 @@ Generate template fragments for the current project based on its existing `[tool
 ```bash
 cd /path/to/my-project
 uv-deps-switcher deploy-templates
-uv-deps-switcher generate-templates
-uv-deps-switcher --deploy-template
 
 # Dry run to preview what would be created
 uv-deps-switcher deploy-templates --dry-run
 ```
 
-Generated fragments include:
-- `templating/pyproject_template_dev.toml_fragment` - local editable sibling paths (prefix resolved at deploy time)
-- `templating/pyproject_template_external.toml_fragment` - local editable paths under `{ACTIVE_DEV_PATH_PREFIX}` (placeholder resolved at mode-switch time)
-- `templating/pyproject_template_release.toml_fragment` - git URLs
-- `templating/pyproject_template_workspace.toml_fragment` - uv workspace sources
-
-The external fragment keeps `{ACTIVE_DEV_PATH_PREFIX}` in the deployed template so it can be resolved per machine when applying `external` mode. The dev fragment bakes in the prefix when you run `deploy-templates` (empty by default for sibling paths; set `ACTIVE_DEV_PATH_PREFIX=ACTIVE_DEV/` at deploy time if needed):
-
-```toml
-phopylslhelper = { path = "{ACTIVE_DEV_PATH_PREFIX}/PhoPyLSLhelper", editable = true }
-```
-
-```bash
-uv-deps-switcher external --checkout-dest "./EXTERNAL"
-```
-
-
 This command:
 1. Reads the current `[tool.uv.sources]` section from `pyproject.toml`
 2. Filters sources to only include dependencies listed in `[project.dependencies]`
-3. Generates dev templates (with local editable sibling paths)
-4. Generates external templates (with `{ACTIVE_DEV_PATH_PREFIX}` paths)
-5. Generates release templates (with git URLs inferred from local repos)
-6. Generates workspace templates (with uv workspace sources)
-7. Writes the generated templates to the `templating/` directory
+3. Generates dev templates (with local editable paths)
+4. Generates release templates (with git URLs inferred from local repos)
+5. Writes both templates to the `templating/` directory
 
 ### Auto-Clone Missing Dependencies
 
-When switching to dev mode, or any custom mode with local paths, if any local dependency paths don't exist, the tool will offer to clone them from GitHub. Clone URLs come from the release template when present, and release-template `rev` values are honored when cloning so branch, tag, and commit pins are checked out instead of the remote default branch. For dependencies with no `git` URL in the release template, the tool builds a fallback URL (`https://github.com/<username>/<repo>.git`, where `<repo>` is the last path component of the dev path) using a username resolved from the following priority chain:
+When switching to dev mode, if any local dependency paths don't exist, the tool will offer to clone them from GitHub. Clone URLs come from the release template when present; for dependencies with no `git` URL in the release template, the tool builds a fallback URL (`https://github.com/<username>/<repo>.git`, where `<repo>` is the last path component of the dev path) using a username resolved from the following priority chain:
 
 1. `default_github_username` in `.uv-deps-switcher.toml` (explicit override)
 2. The active repo's `git remote origin` URL (e.g. `https://github.com/CommanderPho/emotiv-lsl.git` → `CommanderPho`)
@@ -219,58 +182,14 @@ Processing my-project...
     - neuropy -> ../NeuroPy (not found)
   
   Clone 2 missing repo(s) from GitHub? [y/N]: y
-    Cloning https://github.com/CommanderPho/phopylslhelper.git at develop...
+    Cloning https://github.com/CommanderPho/phopylslhelper.git...
     Cloned to ../PhoPyLSLhelper
-    Cloning https://github.com/CommanderPho/NeuroPy.git at feature/safe-advance...
+    Cloning https://github.com/CommanderPho/NeuroPy.git...
     Cloned to ../NeuroPy
   Updated my-project to dev mode
 ```
 
 Use `--no-clone` to skip this prompt and handle missing dependencies manually.
-
-Use `--replace-repos` with dev-like modes to remove and re-clone every local dependency checkout listed in the selected mode template, including paths that already exist. This is useful for a clean external checkout, for example:
-
-```bash
-uv-deps-switcher external --checkout-dest ./EXTERNAL --replace-repos
-uv-deps-switcher external --checkout-dest ./EXTERNAL --replace-repos --yes
-uv-deps-switcher external --checkout-dest ./EXTERNAL --replace-repos --dry-run
-```
-
-`-y`, `--yes`, and `--force` only skip confirmation prompts; destructive re-clone behavior requires `--replace-repos`.
-
-### Clean Up External Checkouts
-
-When you switch **away from** `external` mode (for example to `dev` or `release`), use `--cleanup-external` to delete the local dependency directories listed in each project's `pyproject_template_external.toml_fragment`. This is useful after working with an isolated checkout tree (for example under `./EXTERNAL`) and you want to reclaim disk space once `pyproject.toml` no longer points at those paths.
-
-The flag has no effect when the target mode is `external` itself — it only runs after a successful switch to another mode.
-
-For each processed project, the tool:
-
-1. Applies the new mode template to `pyproject.toml`
-2. Reads the external template and resolves each `path =` entry (using the same `ACTIVE_DEV_PATH_PREFIX` / `--checkout-dest` rules as a normal `external` switch)
-3. Removes any resolved directory that still exists on disk
-
-```bash
-# Switch back to dev and remove the external checkout tree
-uv-deps-switcher dev --cleanup-external
-
-# Preview removals without deleting anything
-uv-deps-switcher dev --cleanup-external --dry-run
-
-# If external deps lived under a custom base, pass the same checkout dest used for external mode
-uv-deps-switcher dev --cleanup-external --checkout-dest "./EXTERNAL"
-```
-
-Example output:
-
-```
-Processing my-project...
-  Updated my-project to dev mode
-  Removed C:\Users\pho\repos\EmotivEpoc\ACTIVE_DEV\EXTERNAL\PhoPyLSLhelper
-  Removed C:\Users\pho\repos\EmotivEpoc\ACTIVE_DEV\EXTERNAL\PhoPyMNEHelper
-```
-
-**Caution:** removal is permanent (`shutil.rmtree`). Use `--dry-run` first to confirm the resolved paths. Only directories referenced in the external template are candidates; sibling `dev` paths (for example `../PhoPyLSLhelper`) are not touched.
 
 ### Additional Options
 
@@ -286,16 +205,6 @@ uv-deps-switcher dev --group main --dry-run
 
 # Skip auto-clone prompts for missing dependencies
 uv-deps-switcher dev --no-clone
-
-# Remove and re-clone local dependency checkouts for dev-like modes
-uv-deps-switcher external --checkout-dest ./EXTERNAL --replace-repos
-
-# Override the local checkout base used by {ACTIVE_DEV_PATH_PREFIX}
-uv-deps-switcher external --checkout-dest ./EXTERNAL
-
-# Remove external checkout directories when switching to another mode
-uv-deps-switcher dev --cleanup-external
-uv-deps-switcher dev --cleanup-external --checkout-dest ./EXTERNAL --dry-run
 
 # List available groups
 uv-deps-switcher list-groups
