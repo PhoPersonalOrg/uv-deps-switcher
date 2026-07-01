@@ -238,6 +238,40 @@ uv-deps-switcher external --checkout-dest ./EXTERNAL --replace-repos --dry-run
 
 `-y`, `--yes`, and `--force` only skip confirmation prompts; destructive re-clone behavior requires `--replace-repos`.
 
+### Clean Up External Checkouts
+
+When you switch **away from** `external` mode (for example to `dev` or `release`), use `--cleanup-external` to delete the local dependency directories listed in each project's `pyproject_template_external.toml_fragment`. This is useful after working with an isolated checkout tree (for example under `./EXTERNAL`) and you want to reclaim disk space once `pyproject.toml` no longer points at those paths.
+
+The flag has no effect when the target mode is `external` itself — it only runs after a successful switch to another mode.
+
+For each processed project, the tool:
+
+1. Applies the new mode template to `pyproject.toml`
+2. Reads the external template and resolves each `path =` entry (using the same `ACTIVE_DEV_PATH_PREFIX` / `--checkout-dest` rules as a normal `external` switch)
+3. Removes any resolved directory that still exists on disk
+
+```bash
+# Switch back to dev and remove the external checkout tree
+uv-deps-switcher dev --cleanup-external
+
+# Preview removals without deleting anything
+uv-deps-switcher dev --cleanup-external --dry-run
+
+# If external deps lived under a custom base, pass the same checkout dest used for external mode
+uv-deps-switcher dev --cleanup-external --checkout-dest "./EXTERNAL"
+```
+
+Example output:
+
+```
+Processing my-project...
+  Updated my-project to dev mode
+  Removed C:\Users\pho\repos\EmotivEpoc\ACTIVE_DEV\EXTERNAL\PhoPyLSLhelper
+  Removed C:\Users\pho\repos\EmotivEpoc\ACTIVE_DEV\EXTERNAL\PhoPyMNEHelper
+```
+
+**Caution:** removal is permanent (`shutil.rmtree`). Use `--dry-run` first to confirm the resolved paths. Only directories referenced in the external template are candidates; sibling `dev` paths (for example `../PhoPyLSLhelper`) are not touched.
+
 ### Additional Options
 
 ```bash
@@ -258,6 +292,10 @@ uv-deps-switcher external --checkout-dest ./EXTERNAL --replace-repos
 
 # Override the local checkout base used by {ACTIVE_DEV_PATH_PREFIX}
 uv-deps-switcher external --checkout-dest ./EXTERNAL
+
+# Remove external checkout directories when switching to another mode
+uv-deps-switcher dev --cleanup-external
+uv-deps-switcher dev --cleanup-external --checkout-dest ./EXTERNAL --dry-run
 
 # List available groups
 uv-deps-switcher list-groups
